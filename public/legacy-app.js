@@ -144,6 +144,44 @@ function normalizeDB(data){
   data.ajustesEstoque = data.ajustesEstoque || [];
   return data;
 }
+function nameKey(value){
+  return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleUpperCase('pt-BR').replace(/\s+/g,' ').trim();
+}
+function sameName(a,b){ return nameKey(a)===nameKey(b); }
+function replaceExactName(value, oldName, newName){ return value===oldName ? newName : value; }
+function renameBrutoReferences(oldName,newName){
+  if(!oldName || oldName===newName) return;
+  (db.entradasCentral||[]).forEach(x=>x.produto=replaceExactName(x.produto,oldName,newName));
+  (db.saidasCentral||[]).forEach(x=>x.produto=replaceExactName(x.produto,oldName,newName));
+  (db.producoes||[]).forEach(x=>x.produtoBruto=replaceExactName(x.produtoBruto,oldName,newName));
+  (db.ajustesEstoque||[]).forEach(x=>x.produto=replaceExactName(x.produto,oldName,newName));
+  (db.pedidosCompra||[]).forEach(x=>x.produto=replaceExactName(x.produto,oldName,newName));
+  (db.fracionados||[]).forEach(x=>x.origem=replaceExactName(x.origem,oldName,newName));
+  db.itensManuaisCompra=(db.itensManuaisCompra||[]).map(x=>replaceExactName(x,oldName,newName));
+}
+function renameFracionadoReferences(oldName,newName){
+  if(!oldName || oldName===newName) return;
+  (db.producoes||[]).forEach(x=>x.produtoFracionado=replaceExactName(x.produtoFracionado,oldName,newName));
+  (db.saidasFracionado||[]).forEach(x=>x.produto=replaceExactName(x.produto,oldName,newName));
+}
+function captureCurrentDraft(){
+  const form=document.querySelector(`#form-${currentTab}`);
+  if(!form) return null;
+  const values={};
+  form.querySelectorAll('[name]').forEach(el=>values[el.name]=el.value);
+  return {tab:currentTab,values,focusedName:document.activeElement && document.activeElement.name};
+}
+function restoreCurrentDraft(draft){
+  if(!draft || draft.tab!==currentTab) return;
+  const form=document.querySelector(`#form-${currentTab}`);
+  if(!form) return;
+  Object.entries(draft.values).forEach(([name,value])=>{
+    const el=form.querySelector(`[name="${name}"]`);
+    if(el){ el.value=value; el.dispatchEvent(new Event('change',{bubbles:true})); }
+  });
+  const focused=draft.focusedName && form.querySelector(`[name="${draft.focusedName}"]`);
+  if(focused) focused.focus();
+}
 let storageAvailable = true;
 function saveDB(){
   if(!canEditTab(currentTab)){
@@ -163,9 +201,11 @@ function saveDB(){
 window.__estoqueLegacy = {
   getDB(){ return db; },
   replaceDB(nextDB){
+    const draft = captureCurrentDraft();
     db = normalizeDB(nextDB || seedDB());
     try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(db)); }catch(e){}
     render();
+    restoreCurrentDraft(draft);
   },
   render(){ render(); }
 };
@@ -193,7 +233,9 @@ function resetDB(){
 /* ============================= HELPERS DE CÁLCULO ============================= */
 function todayStr(){ return new Date().toISOString().slice(0,10); }
 function fmtDate(d){ if(!d) return "—"; const [y,m,dd]=d.split("-"); return `${dd}/${m}/${y}`; }
-function fmtNum(n){ return (Math.round((n+Number.EPSILON)*100)/100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function roundStock(n){ return Math.round((Number(n||0)+Number.EPSILON)*100)/100; }
+function exceedsStock(requested,available){ return roundStock(requested)>roundStock(available); }
+function fmtNum(n){ return roundStock(n).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function fmtMoney(n){ return "R$ " + fmtNum(n); }
 function escapeHtml(s){
   return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -203,7 +245,7 @@ function parseBRNumber(s){
   return parseFloat(String(s).replace(/\./g,'').replace(',','.')) || 0;
 }
 function sumWhere(arr, field, val, sumField){
-  return arr.reduce((acc,r)=> r[field]===val ? acc + Number(r[sumField]||0) : acc, 0);
+  return arr.reduce((acc,r)=> sameName(r[field],val) ? acc + Number(r[sumField]||0) : acc, 0);
 }
 function daysBetween(dateStr){
   const d = new Date(dateStr+"T00:00:00");
@@ -214,23 +256,23 @@ function daysBetween(dateStr){
 function saldoCentral(produto){
   const entradas = sumWhere(db.entradasCentral,'produto',produto,'quantidade');
   const saidas = sumWhere(db.saidasCentral,'produto',produto,'quantidade');
-  const consumoDireto = db.producoes.reduce((a,p)=>p.produtoBruto===produto ? a+Number(p.quantidadeUtilizada||0):a,0);
+  const consumoDireto = db.producoes.reduce((a,p)=>sameName(p.produtoBruto,produto) ? a+Number(p.quantidadeUtilizada||0):a,0);
   const ajustes = sumWhere(db.ajustesEstoque,'produto',produto,'diferenca');
-  return entradas - saidas - consumoDireto + ajustes;
+  return roundStock(entradas - saidas - consumoDireto + ajustes);
 }
 function saldoCozinhaBruto(produto){
-  const recebido = db.saidasCentral.filter(s=>s.destino===getCozinhaNome()).reduce((a,r)=> r.produto===produto ? a+Number(r.quantidade||0):a,0);
+  const recebido = db.saidasCentral.filter(s=>s.destino===getCozinhaNome()).reduce((a,r)=> sameName(r.produto,produto) ? a+Number(r.quantidade||0):a,0);
   const consumido = sumWhere(db.producoes,'produtoBruto',produto,'quantidadeUtilizada');
-  return recebido - consumido;
+  return roundStock(recebido - consumido);
 }
 function saldoLocalBruto(produto, local){
-  return db.saidasCentral.filter(s=>s.destino===local).reduce((a,r)=> r.produto===produto ? a+Number(r.quantidade||0):a,0);
+  return roundStock(db.saidasCentral.filter(s=>s.destino===local).reduce((a,r)=> sameName(r.produto,produto) ? a+Number(r.quantidade||0):a,0));
 }
 function saldoCozinhaFracionado(produto){
-  return sumWhere(db.producoes,'produtoFracionado',produto,'quantidadeProduzida') - sumWhere(db.saidasFracionado,'produto',produto,'quantidade');
+  return roundStock(sumWhere(db.producoes,'produtoFracionado',produto,'quantidadeProduzida') - sumWhere(db.saidasFracionado,'produto',produto,'quantidade'));
 }
 function saldoLocalFracionado(produto, local){
-  return db.saidasFracionado.filter(s=>s.destino===local).reduce((a,r)=> r.produto===produto ? a+Number(r.quantidade||0):a,0);
+  return roundStock(db.saidasFracionado.filter(s=>s.destino===local).reduce((a,r)=> sameName(r.produto,produto) ? a+Number(r.quantidade||0):a,0));
 }
 function statusBadge(saldo, minimo){
   if(saldo<=minimo) return `<span class="badge-status st-bad">⚠ ABAIXO DO MÍNIMO</span>`;
@@ -387,8 +429,11 @@ const defBrutos = {
   ],
   validate:(row, editIdx)=>{
     if(!row.nome) return "Informe o nome do produto.";
-    if(db.brutos.some((b,i)=>i!==editIdx && b.nome.toLowerCase()===row.nome.toLowerCase())) return "Já existe um produto bruto com esse nome.";
+    if(db.brutos.some((b,i)=>i!==editIdx && sameName(b.nome,row.nome))) return "Já existe um produto bruto com esse nome (considerando também acentos).";
     return null;
+  },
+  beforeSave:(row,editIdx)=>{
+    if(editIdx!=null) renameBrutoReferences(db.brutos[editIdx] && db.brutos[editIdx].nome,row.nome);
   }
 };
 
@@ -415,9 +460,12 @@ const defFracionados = {
   ],
   validate:(row, editIdx)=>{
     if(!row.nome) return "Informe o nome do produto fracionado.";
-    if(db.fracionados.some((f,i)=>i!==editIdx && f.nome.toLowerCase()===row.nome.toLowerCase())) return "Já existe um produto fracionado com esse nome.";
+    if(db.fracionados.some((f,i)=>i!==editIdx && sameName(f.nome,row.nome))) return "Já existe um produto fracionado com esse nome (considerando também acentos).";
     if(!row.origem) return "Selecione o produto bruto de origem.";
     return null;
+  },
+  beforeSave:(row,editIdx)=>{
+    if(editIdx!=null) renameFracionadoReferences(db.fracionados[editIdx] && db.fracionados[editIdx].nome,row.nome);
   }
 };
 
@@ -546,7 +594,7 @@ const defSaidasCentral = {
       if(!prodSel.value){ hint.textContent=''; return; }
       const s = saldoCentral(prodSel.value);
       hint.textContent = `Saldo disponível na Central: ${fmtNum(s)}`;
-      hint.className = 'hint' + (Number(qtdInput.value||0) > s ? ' warn' : '');
+      hint.className = 'hint' + (exceedsStock(qtdInput.value,s) ? ' warn' : '');
     }
     prodSel.addEventListener('change', update); qtdInput.addEventListener('input', update); update();
   },
@@ -559,7 +607,7 @@ const defSaidasCentral = {
       const old = db.saidasCentral[editIdx];
       if(old && old.produto===row.produto) s += Number(old.quantidade||0);
     }
-    if(row.quantidade > s) return `Saldo insuficiente na Central. Disponível: ${fmtNum(s)}.`;
+    if(exceedsStock(row.quantidade,s)) return `Saldo insuficiente na Central. Disponível: ${fmtNum(s)}.`;
     return null;
   }
 };
@@ -600,7 +648,7 @@ const defProducoes = {
       brutoSel.value=f.origem||'';
       const s = saldoCentral(f.origem);
       hint.textContent = `Disponível na ${getCentralNome()}: ${fmtNum(s)} (${f.origem})`;
-      hint.className = 'hint' + (Number(qtdInput.value||0) > s ? ' warn' : '');
+      hint.className = 'hint' + (exceedsStock(qtdInput.value,s) ? ' warn' : '');
     }
     prodSel.addEventListener('change', update); qtdInput.addEventListener('input', update); update();
   },
@@ -616,7 +664,7 @@ const defProducoes = {
       const old = db.producoes[editIdx];
       if(old && old.produtoBruto===row.produtoBruto) s += Number(old.quantidadeUtilizada||0);
     }
-    if(row.quantidadeUtilizada > s) return `Bruto insuficiente na ${getCentralNome()}. Disponível: ${fmtNum(s)}.`;
+    if(exceedsStock(row.quantidadeUtilizada,s)) return `Bruto insuficiente na ${getCentralNome()}. Disponível: ${fmtNum(s)}.`;
     return null;
   }
 };
@@ -646,7 +694,7 @@ const defSaidasFracionado = {
       if(!prodSel.value){ hint.textContent=''; return; }
       const s = saldoCozinhaFracionado(prodSel.value);
       hint.textContent = `Disponível na Cozinha: ${fmtNum(s)}`;
-      hint.className = 'hint' + (Number(qtdInput.value||0) > s ? ' warn' : '');
+      hint.className = 'hint' + (exceedsStock(qtdInput.value,s) ? ' warn' : '');
     }
     prodSel.addEventListener('change', update); qtdInput.addEventListener('input', update); update();
   },
@@ -659,7 +707,7 @@ const defSaidasFracionado = {
       const old = db.saidasFracionado[editIdx];
       if(old && old.produto===row.produto) s += Number(old.quantidade||0);
     }
-    if(row.quantidade > s) return `Saldo insuficiente de fracionado na Cozinha. Disponível: ${fmtNum(s)}.`;
+    if(exceedsStock(row.quantidade,s)) return `Saldo insuficiente de fracionado na Cozinha. Disponível: ${fmtNum(s)}.`;
     return null;
   }
 };
@@ -1261,7 +1309,7 @@ function concluirProducao(produtoFracionado){
   if(sugestao<=0){ alert('Este item já está acima do estoque mínimo — nada a concluir.'); render(); return; }
   const brutoNecessario = f.rendimento>0 ? sugestao/(f.rendimento/100) : 0;
   const brutoDisp = saldoCentral(f.origem);
-  if(brutoNecessario > brutoDisp){
+  if(exceedsStock(brutoNecessario,brutoDisp)){
     alert(`Bruto insuficiente na ${getCentralNome()} para produzir. Necessário: ${fmtNum(brutoNecessario)}, disponível: ${fmtNum(brutoDisp)}.`);
     return;
   }
