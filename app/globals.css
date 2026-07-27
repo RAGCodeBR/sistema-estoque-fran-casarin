@@ -627,3 +627,5 @@
 .tabletools{display:flex;align-items:center;gap:10px;margin:2px 0 12px;flex-wrap:wrap}.tabletools input{max-width:360px;margin:0}.tabletools .hint{margin:0}
 
 @media(max-width:600px){html{-webkit-text-size-adjust:100%}body{min-width:0}#content{padding:12px}form.entryform input,form.entryform select,form.entryform button,.tabletools input{width:100%;min-height:48px;font-size:16px}form.entryform .btn{min-height:50px}}
+
+@media(max-width:600px){#content .card>table{min-width:0;width:100%;table-layout:fixed}#content .card>table th,#content .card>table td{white-space:normal;overflow-wrap:anywhere;padding:9px 6px}#content .card>table th:nth-child(4),#content .card>table td:nth-child(4){display:none}#content .card>table th:nth-child(1){width:42%}#content .card>table th:nth-child(2){width:14%}#content .card>table th:nth-child(3){width:19%}#content .card>table th:nth-child(5){width:25%}.badge-status{white-space:normal;font-size:10px;line-height:1.2}}
