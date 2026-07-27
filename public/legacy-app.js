@@ -3,6 +3,7 @@ const CATEGORIAS_PADRAO = ["Peixes e Frutos do Mar","Grãos e Cereais","Hortifru
 // Categorias agora são cadastráveis (aba Categorias) — esta função sempre lê a lista atual de db.categorias,
 // então uma categoria nova cadastrada aparece automaticamente nos formulários de Produtos Brutos, Fracionados e Importar NF.
 function compareText(a,b){ return String(a||'').localeCompare(String(b||''), 'pt-BR', {sensitivity:'base'}); }
+function searchText(value){ return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('pt-BR'); }
 function nomesOrdenados(items){ return (items||[]).map(x=>typeof x==='string'?x:x.nome).filter(Boolean).sort(compareText); }
 function categoriaOptions(){ return nomesOrdenados(db.categorias); }
 const UNIDADES = ["KG","G","L","ML","UN","CX","PCT"];
@@ -511,7 +512,7 @@ const defCategorias = {
 };
 
 const defEntradasCentral = {
-  key:'entradasCentral', title:'Entrada na Central de Distribuição', subtitle:'Toda mercadoria comprada entra aqui primeiro.', groupByDate:true,
+  key:'entradasCentral', title:'Entrada na Central de Distribuição', subtitle:'Toda mercadoria comprada entra aqui primeiro.', groupByDate:true, searchableTable:true, searchPlaceholder:'Buscar por produto, fornecedor, NF ou data…',
   fields:[
     {name:'data', label:'Data', type:'date', default:todayStr},
     {name:'nf', label:'Nº NF / Documento', type:'text'},
@@ -574,7 +575,7 @@ const defEntradasCentral = {
 };
 
 const defSaidasCentral = {
-  key:'saidasCentral', title:'Saída da Central de Distribuição', subtitle:'Envio para Buffet, Sushi, Restaurante ou Cozinha de Fracionamento.', groupByDate:true,
+  key:'saidasCentral', title:'Saída da Central de Distribuição', subtitle:'Envio para Buffet, Sushi, Restaurante ou Cozinha de Fracionamento.', groupByDate:true, searchableTable:true, searchPlaceholder:'Buscar por produto, destino, documento ou data…',
   fields:[
     {name:'data', label:'Data', type:'date', default:todayStr},
     {name:'documento', label:'Nº Documento', type:'text'},
@@ -617,7 +618,7 @@ const defSaidasCentral = {
 };
 
 const defProducoes = {
-  key:'producoes', title:'Entrada de Fracionados', subtitle:'Selecione o fracionado: o bruto de origem e o saldo disponível na Central são preenchidos automaticamente. Apenas a quantidade utilizada será baixada.', groupByDate:true,
+  key:'producoes', title:'Entrada de Fracionados', subtitle:'Selecione o fracionado: o bruto de origem e o saldo disponível na Central são preenchidos automaticamente. Apenas a quantidade utilizada será baixada.', groupByDate:true, searchableTable:true, searchPlaceholder:'Buscar por produto ou data…',
   fields:[
     {name:'data', label:'Data', type:'date', default:todayStr},
     {name:'produtoFracionado', label:'Produto Fracionado', type:'select', options:()=>nomesOrdenados(db.fracionados), searchable:true},
@@ -674,7 +675,7 @@ const defProducoes = {
 };
 
 const defSaidasFracionado = {
-  key:'saidasFracionado', title:'Saída de Estoque Fracionado', subtitle:'Envio de fracionados da Cozinha para os setores consumidores.', groupByDate:true,
+  key:'saidasFracionado', title:'Saída de Estoque Fracionado', subtitle:'Envio de fracionados da Cozinha para os setores consumidores.', groupByDate:true, searchableTable:true, searchPlaceholder:'Buscar por produto, destino, documento ou data…',
   fields:[
     {name:'data', label:'Data', type:'date', default:todayStr},
     {name:'documento', label:'Nº Documento', type:'text'},
@@ -717,7 +718,7 @@ const defSaidasFracionado = {
 };
 
 const defAjustesEstoque = {
-  key:'ajustesEstoque', title:'Ajuste de Estoque', groupByDate:true,
+  key:'ajustesEstoque', title:'Ajuste de Estoque', groupByDate:true, searchableTable:true, searchPlaceholder:'Buscar por produto, motivo, responsável ou data…',
   subtitle:'Corrija o saldo de um produto após uma contagem física. Todo ajuste precisa de motivo e responsável.',
   fields:[
     {name:'data', label:'Data', type:'date', default:todayStr},
@@ -794,7 +795,7 @@ function renderCrud(def){
     </div>
     <div class="card">
       <h2>Registros (${db[def.key].length})</h2>
-      ${def.searchableTable ? `<div class="tabletools"><input id="search-${def.key}" type="search" placeholder="Buscar por nome, categoria ou fornecedor…" autocomplete="off"><span class="hint">Produtos em ordem alfabética.</span></div>` : ''}
+      ${def.searchableTable ? `<div class="tabletools"><input id="search-${def.key}" type="search" placeholder="${def.searchPlaceholder||'Buscar por nome, categoria ou fornecedor…'}" autocomplete="off">${def.sortRows ? '<span class="hint">Produtos em ordem alfabética.</span>' : ''}</div>` : ''}
       <div id="table-${def.key}"></div>
     </div>
   `;
@@ -881,9 +882,9 @@ function renderTable(def, container){
   const rows = db[def.key];
   if(rows.length===0){ container.innerHTML = `<div class="empty">Nenhum registro lançado ainda.</div>`; return; }
   if(def.groupByDate){ renderTableGrouped(def, container, rows); return; }
-  const query=String(crudSearch[def.key]||'').trim().toLocaleLowerCase('pt-BR');
+  const query=searchText(crudSearch[def.key]);
   let indexedRows=rows.map((r,idx)=>({r,idx}));
-  if(query) indexedRows=indexedRows.filter(({r})=>JSON.stringify(r).toLocaleLowerCase('pt-BR').includes(query));
+  if(query) indexedRows=indexedRows.filter(({r})=>searchText(JSON.stringify(r)).includes(query));
   if(def.sortRows) indexedRows.sort((a,b)=>compareText(def.sortRows(a.r),def.sortRows(b.r)));
   if(indexedRows.length===0){ container.innerHTML=`<div class="empty">Nenhum registro encontrado para esta busca.</div>`; return; }
   let html = `<table><thead><tr>`;
@@ -935,7 +936,10 @@ function renderTableGrouped(def, container, rows){
   const expanded = !!historyExpanded[def.key];
   const limite = daysAgoStr(2); // hoje, ontem e anteontem = últimos 3 dias
   const indexed = rows.map((r, idx)=>({r, idx}));
-  const visible = expanded ? indexed : indexed.filter(x=> !x.r.data || x.r.data>=limite);
+  const query = searchText(crudSearch[def.key]);
+  const matching = query ? indexed.filter(({r})=>searchText(JSON.stringify(r)).includes(query)) : indexed;
+  // Ao buscar, percorremos todo o histórico para que um produto antigo também seja localizado.
+  const visible = (expanded || query) ? matching : matching.filter(x=> !x.r.data || x.r.data>=limite);
   const hiddenCount = indexed.length - visible.length;
 
   let html = '';
@@ -994,26 +998,28 @@ function renderEstoque(){
 function renderEstoqueCentral(){
   const c = document.getElementById('content');
   let html = `<h1 class="pagetitle">Estoque Central</h1><p class="pagesub">Saldo dos produtos brutos na Central de Distribuição, calculado automaticamente.</p>`;
-  html += `<div class="card"><h2>Produtos Brutos — Saldo na ${getCentralNome()}</h2><table><thead><tr>
+  html += `<div class="card"><h2>Produtos Brutos — Saldo na ${getCentralNome()}</h2>${screenSearchTool('estoqueCentral', 'Buscar produto, categoria ou unidade…')}<table><thead><tr>
     <th>Produto</th><th>Unidade</th><th>Saldo Atual</th><th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>`;
   [...db.brutos].sort((a,b)=>compareText(a.nome,b.nome)).forEach(b=>{
     const s = saldoCentral(b.nome);
-    html += `<tr><td><strong>${b.nome}</strong></td><td>${b.unidade}</td><td>${fmtNum(s)}</td><td>${fmtNum(b.estoqueMinimo)}</td><td>${statusBadge(s,b.estoqueMinimo)}</td></tr>`;
+    html += `<tr class="screen-search-row"><td><strong>${b.nome}</strong></td><td>${b.unidade}</td><td>${fmtNum(s)}</td><td>${fmtNum(b.estoqueMinimo)}</td><td>${statusBadge(s,b.estoqueMinimo)}</td></tr>`;
   });
   html += `</tbody></table></div>`;
   c.innerHTML = html;
+  wireScreenSearch(c, 'estoqueCentral');
 }
 function renderEstoqueFracionados(){
   const c = document.getElementById('content');
   let html = `<h1 class="pagetitle">Estoque Fracionados</h1><p class="pagesub">Saldo dos produtos preparados e fracionados, calculado automaticamente.</p>`;
-  html += `<div class="card"><h2>Produtos Fracionados - Saldo produzido</h2><table><thead><tr>
+  html += `<div class="card"><h2>Produtos Fracionados - Saldo produzido</h2>${screenSearchTool('estoqueFracionados', 'Buscar produto, origem, categoria ou unidade…')}<table><thead><tr>
     <th>Produto</th><th>Unidade</th><th>Saldo Atual</th><th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>`;
   [...db.fracionados].sort((a,b)=>compareText(a.nome,b.nome)).forEach(f=>{
     const s = saldoCozinhaFracionado(f.nome);
-    html += `<tr><td><strong>${f.nome}</strong></td><td>${f.unidade}</td><td>${fmtNum(s)}</td><td>${fmtNum(f.estoqueMinimo)}</td><td>${statusBadge(s,f.estoqueMinimo)}</td></tr>`;
+    html += `<tr class="screen-search-row"><td><strong>${f.nome}</strong></td><td>${f.unidade}</td><td>${fmtNum(s)}</td><td>${fmtNum(f.estoqueMinimo)}</td><td>${statusBadge(s,f.estoqueMinimo)}</td></tr>`;
   });
   html += `</tbody></table></div>`;
   c.innerHTML = html;
+  wireScreenSearch(c, 'estoqueFracionados');
 }
 
 /* ============================= COMPRAS DO DIA ============================= */
@@ -1023,7 +1029,7 @@ function getComprasSugeridas(){
     const sugestao = Math.max(0, (b.estoqueMinimo||0) - saldo);
     return {produto:b.nome, categoria:b.categoria, fornecedor:b.fornecedor||"—", saldo, minimo:b.estoqueMinimo||0,
       sugestao, precoMedio:b.precoMedio||0, valorEstimado: sugestao*(b.precoMedio||0), abaixo: saldo<(b.estoqueMinimo||0), manual:false};
-  }).filter(x=>x.abaixo);
+  }).filter(x=>x.abaixo).sort((a,b)=>compareText(a.produto,b.produto));
 }
 // Itens que o usuário adicionou manualmente à lista de compras (mesmo sem estarem abaixo do mínimo).
 function getItensManuaisCompra(){
@@ -1113,8 +1119,8 @@ function copiarTexto(texto, btnEl){
 
 function renderCompras(){
   const c = document.getElementById('content');
-  const compras = [...getComprasSugeridas(), ...getItensManuaisCompra()];
-  const producao = getProducaoSugerida();
+  const compras = [...getComprasSugeridas(), ...getItensManuaisCompra()].sort((a,b)=>compareText(a.produto,b.produto));
+  const producao = getProducaoSugerida().sort((a,b)=>compareText(a.produto,b.produto));
   const totalValorInicial = compras.reduce((a,x)=> pedidoPendenteFor(x.produto) ? a : a+x.valorEstimado, 0);
 
   let html = `<h1 class="pagetitle">Sugestão de Pedido</h1><p class="pagesub">Gerada automaticamente em ${fmtDate(todayStr())}, com base nos itens abaixo do estoque mínimo — mais os itens que você adicionar manualmente.</p>`;
@@ -1152,7 +1158,7 @@ function renderCompras(){
     html += `<button type="button" class="btn secondary" id="btnFecharMensagens">✕ Fechar Mensagens</button></div>`;
   }
 
-  html += `<div class="card"><h2>Compras Sugeridas — Produtos Brutos</h2>
+  html += `<div class="card"><h2>Compras Sugeridas — Produtos Brutos</h2>${screenSearchTool('compras', 'Buscar produto, categoria ou fornecedor…')}
     <p class="footnote" style="margin-top:-6px">Marque os itens que quer comprar e ajuste a quantidade se necessário. Ao clicar em "Fazer Pedido dos Selecionados", eles vão para <strong>Pedido Feito — Conferência</strong> (só entram no estoque quando você confirmar o recebimento) e uma mensagem pronta é gerada para cada fornecedor.</p>`;
   if(compras.length===0){
     html += `<div class="msg-ok">✓ Nenhum produto bruto abaixo do estoque mínimo hoje.</div>`;
@@ -1165,20 +1171,20 @@ function renderCompras(){
     }
     html += `<table><thead><tr><th></th><th>Produto</th><th>Categoria</th><th>Saldo Atual</th><th>Estoque Mínimo</th>
       <th>Sugestão</th><th>Qtd. a Pedir</th><th>Preço Médio</th><th>Valor Estimado</th><th></th></tr></thead><tbody>`;
-    Object.keys(porFornecedor).forEach(forn=>{
+    Object.keys(porFornecedor).sort(compareText).forEach(forn=>{
       html += `<tr class="subheader"><td colspan="10">Fornecedor: ${forn}</td></tr>`;
-      porFornecedor[forn].forEach(x=>{
+      porFornecedor[forn].sort((a,b)=>compareText(a.produto,b.produto)).forEach(x=>{
         const pendente = pedidoPendenteFor(x.produto);
         const tagManual = x.manual ? ` <span class="badge-status st-warn" style="font-size:10px;vertical-align:middle">Manual</span>` : '';
         if(pendente){
-          html += `<tr><td>—</td><td><strong>${x.produto}</strong>${tagManual}</td><td>${x.categoria}</td><td>${fmtNum(x.saldo)}</td>
+          html += `<tr class="screen-search-row"><td>—</td><td><strong>${x.produto}</strong>${tagManual}</td><td>${x.categoria}</td><td>${fmtNum(x.saldo)}</td>
             <td>${fmtNum(x.minimo)}</td><td>${fmtNum(x.sugestao)}</td>
             <td colspan="2"><span class="badge-status st-warn">📦 Pedido feito — ${fmtNum(pendente.quantidadePedida)} aguardando conferência</span></td>
             <td>—</td>
             <td><button class="btn secondary btnVerConferencia" style="white-space:nowrap">Ver na Conferência</button></td></tr>`;
         } else {
           const inputId = "qtdPedido_"+x.produto.replace(/[^a-zA-Z0-9]/g,'_');
-          html += `<tr><td><input type="checkbox" class="itemCheckbox" data-produto="${x.produto.replace(/"/g,'&quot;')}" checked></td>
+          html += `<tr class="screen-search-row"><td><input type="checkbox" class="itemCheckbox" data-produto="${x.produto.replace(/"/g,'&quot;')}" checked></td>
             <td><strong>${x.produto}</strong>${tagManual}</td><td>${x.categoria}</td><td>${fmtNum(x.saldo)}</td>
             <td>${fmtNum(x.minimo)}</td><td>${fmtNum(x.sugestao)}</td>
             <td><input type="number" step="0.01" min="0.01" class="qtdPedidoInput" id="${inputId}" data-produto="${x.produto.replace(/"/g,'&quot;')}" data-preco="${x.precoMedio}" value="${x.sugestao}" style="width:90px"></td>
@@ -1203,7 +1209,7 @@ function renderCompras(){
       <th>Sugestão de Produção</th><th>Bruto Disponível na Central</th><th>Situação</th><th></th></tr></thead><tbody>`;
     producao.forEach(x=>{
       const sit = x.brutoSuficiente ? `<span class="badge-status st-ok">✓ Bruto suficiente</span>` : `<span class="badge-status st-bad">⚠ Falta bruto (necessário ≈ ${fmtNum(x.brutoNecessario)})</span>`;
-      html += `<tr><td><strong>${x.produto}</strong></td><td>${x.origem}</td><td>${fmtNum(x.saldo)}</td><td>${fmtNum(x.minimo)}</td>
+      html += `<tr class="screen-search-row"><td><strong>${x.produto}</strong></td><td>${x.origem}</td><td>${fmtNum(x.saldo)}</td><td>${fmtNum(x.minimo)}</td>
         <td>${fmtNum(x.sugestao)}</td><td>${fmtNum(x.brutoDisp)}</td><td>${sit}</td>
         <td><button class="btn secondary btnConcluirProducao" data-produto="${x.produto.replace(/"/g,'&quot;')}" style="white-space:nowrap" ${x.brutoSuficiente?'':'disabled title="Bruto insuficiente"'}>✓ Concluir</button></td></tr>`;
     });
@@ -1212,6 +1218,7 @@ function renderCompras(){
   html += `</div>`;
 
   c.innerHTML = html;
+  wireScreenSearch(c, 'compras');
   c.querySelectorAll('.btnConcluirProducao').forEach(btn=>{
     btn.addEventListener('click', ()=> concluirProducao(btn.dataset.produto));
   });
@@ -1573,16 +1580,40 @@ async function renderUsuarios(){
 }
 
 /* ============================= ALERTAS ============================= */
+let screenSearch = {};
+function screenSearchTool(key, placeholder){
+  return `<div class="tabletools"><input id="screen-search-${key}" type="search" placeholder="${placeholder}" autocomplete="off"><span class="hint">A busca ignora acentos.</span></div>`;
+}
+function wireScreenSearch(container, key){
+  const input = container.querySelector(`#screen-search-${key}`);
+  if(!input) return;
+  const rows = [...container.querySelectorAll('.screen-search-row')];
+  input.value = screenSearch[key] || '';
+  const apply = ()=>{
+    const query = searchText(input.value);
+    screenSearch[key] = input.value;
+    rows.forEach(row=>{ row.hidden = !!query && !searchText(row.textContent).includes(query); });
+    container.querySelectorAll('.subheader').forEach(header=>{
+      const body = header.parentElement;
+      const followingRows = [];
+      let next = header.nextElementSibling;
+      while(next && !next.classList.contains('subheader')){ if(next.classList.contains('screen-search-row')) followingRows.push(next); next=next.nextElementSibling; }
+      header.hidden = !!query && followingRows.length>0 && followingRows.every(row=>row.hidden);
+    });
+  };
+  input.addEventListener('input', apply);
+  apply();
+}
 function renderAlertas(){
   const c = document.getElementById('content');
-  const min = getAlertasMinimo();
-  const val = getAlertasValidade();
+  const min = getAlertasMinimo().sort((a,b)=>compareText(a.produto,b.produto));
+  const val = getAlertasValidade().sort((a,b)=>compareText(a.produto,b.produto));
   let html = `<h1 class="pagetitle">Alertas</h1><p class="pagesub">Estoque mínimo e validade próxima, atualizados automaticamente.</p>`;
 
-  html += `<div class="card"><h2>Estoque Mínimo</h2><table><thead><tr>
+  html += `<div class="card"><h2>Estoque Mínimo</h2>${screenSearchTool('alertas', 'Buscar produto ou tipo de alerta…')}<table><thead><tr>
     <th>Produto</th><th>Tipo</th><th>Saldo Atual</th><th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>`;
   min.forEach(x=>{
-    html += `<tr><td><strong>${x.produto}</strong></td><td>${x.tipo}</td><td>${fmtNum(x.saldo)}</td><td>${fmtNum(x.minimo)}</td><td>${statusBadge(x.saldo,x.minimo)}</td></tr>`;
+    html += `<tr class="screen-search-row"><td><strong>${x.produto}</strong></td><td>${x.tipo}</td><td>${fmtNum(x.saldo)}</td><td>${fmtNum(x.minimo)}</td><td>${statusBadge(x.saldo,x.minimo)}</td></tr>`;
   });
   html += `</tbody></table></div>`;
 
@@ -1590,10 +1621,11 @@ function renderAlertas(){
     <th>Tipo</th><th>Produto</th><th>Data de Validade</th><th>Dias Para Vencer</th><th>Status</th></tr></thead><tbody>`;
   if(val.length===0){ html += `<tr><td colspan="5" class="empty">Nenhum lote com validade registrada.</td></tr>`; }
   val.forEach(x=>{
-    html += `<tr><td>${x.tipo}</td><td><strong>${x.produto}</strong></td><td>${fmtDate(x.validade)}</td><td>${x.dias}</td><td>${validadeBadge(x.dias)}</td></tr>`;
+    html += `<tr class="screen-search-row"><td>${x.tipo}</td><td><strong>${x.produto}</strong></td><td>${fmtDate(x.validade)}</td><td>${x.dias}</td><td>${validadeBadge(x.dias)}</td></tr>`;
   });
   html += `</tbody></table></div>`;
   c.innerHTML = html;
+  wireScreenSearch(c, 'alertas');
 }
 
 /* ============================= RELATÓRIOS ============================= */
