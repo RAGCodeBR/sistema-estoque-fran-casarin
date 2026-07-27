@@ -395,10 +395,14 @@ function render(){
 
 function updateSidebarBadges(){
   const alertasMin = getAlertasMinimo().filter(a=>a.abaixo).length;
+  // A tela "Sugestão de Pedido" mostra somente insumos brutos compráveis.
+  // Fracionados abaixo do mínimo pertencem à sugestão de produção; contá-los
+  // aqui fazia o número do menu divergir da lista que o usuário abre.
+  const sugestoesCompra = getComprasSugeridas().length;
   const alertasVal = getAlertasValidade().filter(a=>a.dias<=3).length;
   const totalAlertas = alertasMin + alertasVal;
   const bC = document.getElementById('badgeCompras'), bA = document.getElementById('badgeAlertas');
-  if(alertasMin>0){ bC.style.display='inline-block'; bC.textContent = alertasMin; } else bC.style.display='none';
+  if(sugestoesCompra>0){ bC.style.display='inline-block'; bC.textContent = sugestoesCompra; } else bC.style.display='none';
   if(totalAlertas>0){ bA.style.display='inline-block'; bA.textContent = totalAlertas; } else bA.style.display='none';
   const bP = document.getElementById('badgeConferencia');
   const pendentes = db.pedidosCompra.filter(p=>p.status==='pendente').length;
