@@ -115,7 +115,7 @@ export default function LegacyStockSystem() {
             window.__estoqueLegacy.replaceDB(freshDB);
             showToast("Atualizado");
           }
-        });
+        }, perfil.papel === "controle_fracionados" ? "fracionados" : "full");
 
         const response = await fetch(`${basePath}/legacy-body.html?v=${assetVersion}`, { cache: "no-store" });
         if (!response.ok) throw new Error("Nao foi possivel carregar a interface.");
@@ -293,4 +293,3 @@ export default function LegacyStockSystem() {
     </>
   );
 }
-

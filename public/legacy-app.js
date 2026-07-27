@@ -2921,7 +2921,19 @@ initLock();
       c.innerHTML='<h1 class="pagetitle">'+title+'</h1><p class="pagesub">'+subtitle+'</p><div class="card"><h2>'+heading+'</h2>'+screenSearchTool(key,'Buscar produto, categoria ou unidade…')+'<p class="footnote" id="paged-stock-count"></p><table><thead><tr><th>Produto</th><th>Unidade</th><th>Saldo Atual</th><th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>'+shown.map(item=>{const atual=saldo(item);return '<tr class="screen-search-row"><td><strong>'+escapeHtml(item.nome)+'</strong></td><td>'+escapeHtml(item.unidade||'—')+'</td><td>'+fmtNum(atual)+'</td><td>'+fmtNum(item.estoqueMinimo)+'</td><td>'+statusBadge(atual,item.estoqueMinimo)+'</td></tr>';}).join('')+'</tbody></table>'+(shown.length<filtered.length?'<button type="button" class="btn secondary" id="paged-more-'+key+'">Mostrar mais ('+(filtered.length-shown.length)+')</button>':'')+'</div>';
       c.querySelector('#paged-stock-count').textContent='Mostrando '+shown.length+' de '+filtered.length+' produto(s).';
       const input=c.querySelector('#screen-search-'+key);input.value=query;
-      input.addEventListener('input',()=>{query=input.value;screenSearch[key]=query;limit=window.innerWidth<=600?60:100;draw();});
+      input.addEventListener('input',()=>{
+        query=input.value;
+        screenSearch[key]=query;
+        limit=window.innerWidth<=600?60:100;
+        draw();
+        // A tela é redesenhada para atualizar a lista. Devolver o foco evita
+        // que a busca aceite apenas uma letra por vez.
+        const nextInput=c.querySelector('#screen-search-'+key);
+        if(nextInput){
+          nextInput.focus();
+          nextInput.setSelectionRange(query.length,query.length);
+        }
+      });
       c.querySelector('#paged-more-'+key)?.addEventListener('click',()=>{limit+=window.innerWidth<=600?60:100;draw();});
     }
     draw();

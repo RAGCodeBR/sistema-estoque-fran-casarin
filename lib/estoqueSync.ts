@@ -289,7 +289,49 @@ async function upsertReturning<T>(supabase: SupabaseClient, table: string, rows:
   return (data ?? []) as T[];
 }
 
-export async function saveLegacyDB(supabase: SupabaseClient, user: User, db: LegacyDB) {
+export type SyncScope = "full" | "fracionados";
+
+async function saveFracionadosMovements(supabase: SupabaseClient, user: User, db: LegacyDB) {
+  // O Controle de Fracionados só pode registrar os movimentos da sua área.
+  // Não sincronizamos catálogo, central ou compras com esse perfil, pois isso
+  // exigiria permissões amplas e podia fazer a gravação falhar por RLS.
+  const [brutos, fracionados, locais] = await Promise.all([
+    selectAll<any>(supabase, "produtos_brutos", "id,nome"),
+    selectAll<any>(supabase, "produtos_fracionados", "id,nome"),
+    selectAll<any>(supabase, "locais", "id,nome"),
+  ]);
+  const brutoMap = byName(brutos);
+  const fracionadoMap = byName(fracionados);
+  const localMap = byName(locais);
+
+  await Promise.all([
+    deleteAll(supabase, "saidas_fracionado"),
+    deleteAll(supabase, "producoes"),
+  ]);
+
+  await insertRows(supabase, "producoes", (db.producoes ?? []).map((p) => ({
+    data: p.data,
+    produto_bruto_id: brutoMap.get(p.produtoBruto)?.id,
+    quantidade_utilizada: num(p.quantidadeUtilizada),
+    produto_fracionado_id: fracionadoMap.get(p.produtoFracionado)?.id,
+    quantidade_produzida: num(p.quantidadeProduzida),
+    criado_por: user.id,
+  })));
+  await insertRows(supabase, "saidas_fracionado", (db.saidasFracionado ?? []).map((s) => ({
+    data: s.data,
+    documento: clean(s.documento),
+    produto_fracionado_id: fracionadoMap.get(s.produto)?.id,
+    destino_local_id: localMap.get(s.destino)?.id,
+    quantidade: num(s.quantidade),
+    criado_por: user.id,
+  })));
+}
+
+export async function saveLegacyDB(supabase: SupabaseClient, user: User, db: LegacyDB, scope: SyncScope = "full") {
+  if (scope === "fracionados") {
+    await saveFracionadosMovements(supabase, user, db);
+    return;
+  }
   const categoriasNomes = new Set<string>();
   db.categorias?.forEach((c) => c.nome && categoriasNomes.add(c.nome));
   db.brutos?.forEach((p) => p.categoria && categoriasNomes.add(p.categoria));
@@ -545,6 +587,7 @@ export function installCloudSync(
   supabase: SupabaseClient,
   user: User,
   onRemoteChange: () => void,
+  scope: SyncScope = "full",
 ): RealtimeChannel {
   let saving = false;
   let saveRevision = 0;
@@ -569,7 +612,7 @@ export function installCloudSync(
         try {
           const nextDB = cloneDB(db);
           const beforeDB = cloneDB(lastSavedDB);
-          await saveLegacyDB(supabase, user, nextDB);
+          await saveLegacyDB(supabase, user, nextDB, scope);
           try {
             await insertSystemLog(supabase, user, beforeDB, nextDB);
           } catch (logError) {
