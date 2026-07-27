@@ -547,6 +547,7 @@ export function installCloudSync(
   onRemoteChange: () => void,
 ): RealtimeChannel {
   let saving = false;
+  let saveRevision = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let remoteTimer: ReturnType<typeof setTimeout> | undefined;
   let lastSavedDB: LegacyDB = (() => {
@@ -562,6 +563,7 @@ export function installCloudSync(
       window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(db));
       clearTimeout(timer);
       window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvando" } }));
+      const revision = ++saveRevision;
       timer = setTimeout(async () => {
         saving = true;
         try {
@@ -581,7 +583,9 @@ export function installCloudSync(
           window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "erro", message } }));
         } finally {
           setTimeout(() => {
-            saving = false;
+            // A nova edição já possui um agendamento próprio. Não libere a
+            // janela de sincronização de uma gravação mais recente.
+            if (revision === saveRevision) saving = false;
           }, 3000);
         }
       }, 900);
@@ -603,7 +607,10 @@ export function installCloudSync(
     .on("postgres_changes", { event: "*", schema: "public" }, () => {
       if (saving) return;
       clearTimeout(remoteTimer);
-      remoteTimer = setTimeout(onRemoteChange, 700);
+      // Uma alteração no legado ainda grava várias tabelas. Esperar a última
+      // notificação evita que outro usuário recarregue um banco parcialmente
+      // sincronizado — a principal causa da sugestão de pedidos parecer parada.
+      remoteTimer = setTimeout(onRemoteChange, 2200);
     })
     .subscribe();
 }
