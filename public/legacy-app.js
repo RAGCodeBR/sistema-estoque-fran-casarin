@@ -2877,3 +2877,31 @@ function renderSeguranca(){
 
 /* ============================= INIT ============================= */
 initLock();
+
+
+/* Listas grandes em blocos no celular: troca de abas sem recriar centenas de linhas. */
+(function(){
+  const originalCentral=renderEstoqueCentral;
+  const originalFracionados=renderEstoqueFracionados;
+  const isMobileList=()=>window.matchMedia && window.matchMedia('(max-width:600px)').matches;
+  function renderMobileStock(key,title,subtitle,heading,items,saldo){
+    const c=document.getElementById('content');
+    const all=[...items()].sort((a,b)=>compareText(a.nome,b.nome));
+    let query=screenSearch[key]||'';
+    let limit=60;
+    function draw(){
+      const q=searchText(query);
+      const filtered=all.filter(item=>!q || searchText([item.nome,item.unidade,item.categoria].join(' ')).includes(q));
+      const shown=filtered.slice(0,limit);
+      c.innerHTML='<h1 class="pagetitle">'+title+'</h1><p class="pagesub">'+subtitle+'</p><div class="card"><h2>'+heading+'</h2>'+screenSearchTool(key,'Buscar produto, categoria ou unidade…')+'<p class="footnote" id="mobile-stock-count"></p><table><thead><tr><th>Produto</th><th>Unidade</th><th>Saldo Atual</th><th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>'+shown.map(item=>{const atual=saldo(item);return '<tr class="screen-search-row"><td><strong>'+escapeHtml(item.nome)+'</strong></td><td>'+escapeHtml(item.unidade||'—')+'</td><td>'+fmtNum(atual)+'</td><td>'+fmtNum(item.estoqueMinimo)+'</td><td>'+statusBadge(atual,item.estoqueMinimo)+'</td></tr>';}).join('')+'</tbody></table>'+(shown.length<filtered.length?'<button type="button" class="btn secondary" id="mobile-more-'+key+'">Mostrar mais ('+(filtered.length-shown.length)+')</button>':'')+'</div>';
+      c.querySelector('#mobile-stock-count').textContent='Mostrando '+shown.length+' de '+filtered.length+' produto(s).';
+      const input=c.querySelector('#screen-search-'+key);
+      input.value=query;
+      input.addEventListener('input',()=>{query=input.value;screenSearch[key]=query;limit=60;draw();});
+      c.querySelector('#mobile-more-'+key)?.addEventListener('click',()=>{limit+=60;draw();});
+    }
+    draw();
+  }
+  renderEstoqueCentral=function(){if(!isMobileList()) return originalCentral();renderMobileStock('estoqueCentral','Estoque Central','Saldo dos produtos brutos na Central de Distribuição, calculado automaticamente.','Produtos Brutos — Saldo na Central de Distribuição',()=>db.brutos,item=>saldoCentral(item.nome));};
+  renderEstoqueFracionados=function(){if(!isMobileList()) return originalFracionados();renderMobileStock('estoqueFracionados','Estoque Fracionados','Saldo dos produtos preparados e fracionados, calculado automaticamente.','Produtos Fracionados — Saldo produzido',()=>db.fracionados,item=>saldoCozinhaFracionado(item.nome));};
+})();
