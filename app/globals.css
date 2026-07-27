@@ -625,3 +625,5 @@
     .save-toast{bottom:22px;}
   }
 .tabletools{display:flex;align-items:center;gap:10px;margin:2px 0 12px;flex-wrap:wrap}.tabletools input{max-width:360px;margin:0}.tabletools .hint{margin:0}
+
+@media(max-width:600px){html{-webkit-text-size-adjust:100%}body{min-width:0}#content{padding:12px}form.entryform input,form.entryform select,form.entryform button,.tabletools input{width:100%;min-height:48px;font-size:16px}form.entryform .btn{min-height:50px}}
