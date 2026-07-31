@@ -18,8 +18,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      NEXT_PUBLIC_SUPABASE_URL: https://zkoioxykpygfacvcozpk.supabase.co
-      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_mvevJTMhzpHIjM0LuYYS9g_6IWl9hn1
+      NEXT_PUBLIC_SUPABASE_URL: https://yoraikzygfptztbrruuh.supabase.co
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_pdYKkcz4U7Z0OyjredeRUg_qJ59hTdY
       NEXT_PUBLIC_APP_VERSION: ${{ github.sha }}
     steps:
       - name: Checkout
