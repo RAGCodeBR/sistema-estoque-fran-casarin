@@ -98,6 +98,23 @@ function assertSafeReplacement(remote: LegacyDB, next: LegacyDB) {
   }
 }
 
+function assertValidMovements(db: LegacyDB) {
+  const requiredPositive: Array<[keyof LegacyDB, string[]]> = [
+    ["entradasCentral", ["quantidade"]],
+    ["saidasCentral", ["quantidade"]],
+    ["saidasFracionado", ["quantidade"]],
+    ["producoes", ["quantidadeUtilizada", "quantidadeProduzida"]],
+    ["pedidosCompra", ["quantidadePedida"]],
+  ];
+  for (const [section, fields] of requiredPositive) {
+    for (const item of (db[section] as Array<Record<string, unknown>>) ?? []) {
+      if (fields.some((field) => !Number.isFinite(Number(item[field])) || Number(item[field]) <= 0)) {
+        throw new Error(`Quantidade inválida em ${String(section)}. Informe um valor maior que zero antes de salvar.`);
+      }
+    }
+  }
+}
+
 async function createCheckpoint(supabase: SupabaseClient, user: User, db: LegacyDB) {
   const { error } = await supabase.from("estoque_checkpoints").insert({
     dados: db,
@@ -669,6 +686,7 @@ export function installCloudSync(
       const revision = ++saveRevision;
       timer = setTimeout(async () => {
         saving = true;
+        let recoveryDB: LegacyDB | undefined;
         try {
           const nextDB = cloneDB(db);
           const beforeDB = cloneDB(lastSavedDB);
@@ -681,7 +699,9 @@ export function installCloudSync(
             throw new Error("O estoque foi alterado em outra sessão. Recarregue a página antes de salvar para não sobrescrever dados.");
           }
           assertSafeReplacement(remoteDB, nextDB);
+          assertValidMovements(nextDB);
           await createCheckpoint(supabase, user, remoteDB);
+          recoveryDB = remoteDB;
           await saveLegacyDB(supabase, user, nextDB, scope);
           try {
             await insertSystemLog(supabase, user, beforeDB, nextDB);
@@ -692,7 +712,18 @@ export function installCloudSync(
           window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
         } catch (error) {
           console.error("Erro ao salvar estoque no Supabase", error);
-          const message = error instanceof Error ? error.message : "Verifique permissao do usuario ou dados obrigatorios.";
+          let message = error instanceof Error ? error.message : "Verifique permissao do usuario ou dados obrigatorios.";
+          if (recoveryDB) {
+            try {
+              await saveLegacyDB(supabase, user, recoveryDB, scope);
+              lastSavedDB = cloneDB(recoveryDB);
+              window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(recoveryDB));
+              message = `${message} O ponto de recuperação foi restaurado automaticamente.`;
+            } catch (restoreError) {
+              console.error("Erro ao restaurar o ponto de recuperação", restoreError);
+              message = `${message} A gravação foi interrompida; o checkpoint foi preservado para restauração.`;
+            }
+          }
           window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "erro", message } }));
         } finally {
           setTimeout(() => {
