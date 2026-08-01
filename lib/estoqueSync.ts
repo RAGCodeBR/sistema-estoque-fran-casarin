@@ -59,6 +59,54 @@ const clean = (value: unknown) => {
   return text.length > 0 ? text : null;
 };
 
+const movementKeys: Array<keyof Pick<LegacyDB, "entradasCentral" | "saidasCentral" | "producoes" | "saidasFracionado" | "ajustesEstoque" | "pedidosCompra">> = [
+  "entradasCentral",
+  "saidasCentral",
+  "producoes",
+  "saidasFracionado",
+  "ajustesEstoque",
+  "pedidosCompra",
+];
+
+function stableSnapshot(db: LegacyDB) {
+  const normalize = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(normalize).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    if (value && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, normalize(item)]));
+    }
+    return value ?? null;
+  };
+  return JSON.stringify(normalize(db));
+}
+
+function movementCount(db: LegacyDB) {
+  return movementKeys.reduce((total, key) => total + (db[key]?.length ?? 0), 0);
+}
+
+function assertSafeReplacement(remote: LegacyDB, next: LegacyDB) {
+  const remoteMovements = movementCount(remote);
+  const nextMovements = movementCount(next);
+
+  if (remoteMovements > 0 && nextMovements === 0) {
+    throw new Error("Proteção ativada: uma cópia vazia não pode substituir o histórico de estoque. Recarregue o sistema.");
+  }
+  if (remoteMovements >= 10 && nextMovements < remoteMovements / 2) {
+    throw new Error("Proteção ativada: esta gravação removeria muitos movimentos de estoque. Recarregue o sistema antes de continuar.");
+  }
+  if (remote.brutos.length > 0 && next.brutos.length === 0) {
+    throw new Error("Proteção ativada: uma cópia sem produtos não pode substituir o cadastro existente.");
+  }
+}
+
+async function createCheckpoint(supabase: SupabaseClient, user: User, db: LegacyDB) {
+  const { error } = await supabase.from("estoque_checkpoints").insert({
+    dados: db,
+    total_movimentos: movementCount(db),
+    criado_por: user.id,
+  });
+  if (error) throw new Error(`Não foi possível criar o ponto de recuperação: ${error.message}`);
+}
+
 async function selectAll<T>(supabase: SupabaseClient, table: string, columns = "*") {
   const { data, error } = await supabase.from(table).select(columns).order("criado_em", { ascending: true });
   if (error) throw error;
@@ -470,9 +518,21 @@ export async function saveLegacyDB(supabase: SupabaseClient, user: User, db: Leg
 }
 
 async function insertRows(supabase: SupabaseClient, table: string, rows: Record<string, any>[]) {
-  const validRows = rows.filter((row) => Object.values(row).every((value) => value !== undefined));
-  if (validRows.length === 0) return;
-  const { error } = await supabase.from(table).insert(validRows);
+  const invalid = rows.find((row) => Object.values(row).some((value) => value === undefined));
+  if (invalid) throw new Error(`Dados incompletos para salvar em ${table}. Nenhum registro foi gravado.`);
+
+  const quantityFields: Record<string, string[]> = {
+    entradas_central: ["quantidade"],
+    saidas_central: ["quantidade"],
+    saidas_fracionado: ["quantidade"],
+    producoes: ["quantidade_utilizada", "quantidade_produzida"],
+    pedidos_compra: ["quantidade_pedida"],
+  };
+  const invalidQuantity = (quantityFields[table] ?? []).some((field) => rows.some((row) => !Number.isFinite(Number(row[field])) || Number(row[field]) <= 0));
+  if (invalidQuantity) throw new Error(`Quantidade inválida em ${table}. Informe um valor maior que zero.`);
+
+  if (rows.length === 0) return;
+  const { error } = await supabase.from(table).insert(rows);
   if (error) throw error;
 }
 
@@ -612,6 +672,16 @@ export function installCloudSync(
         try {
           const nextDB = cloneDB(db);
           const beforeDB = cloneDB(lastSavedDB);
+          const remoteDB = await loadLegacyDB(supabase);
+
+          // Nunca permita que uma aba antiga sobrescreva alterações feitas por
+          // outra pessoa. O usuário precisa recarregar e trabalhar sobre a
+          // versão atual do banco.
+          if (stableSnapshot(remoteDB) !== stableSnapshot(beforeDB)) {
+            throw new Error("O estoque foi alterado em outra sessão. Recarregue a página antes de salvar para não sobrescrever dados.");
+          }
+          assertSafeReplacement(remoteDB, nextDB);
+          await createCheckpoint(supabase, user, remoteDB);
           await saveLegacyDB(supabase, user, nextDB, scope);
           try {
             await insertSystemLog(supabase, user, beforeDB, nextDB);
