@@ -195,7 +195,7 @@ function saveDB(){
     if(storageAvailable){ storageAvailable = false; showStorageWarning(); }
   }
   if(window.__estoqueCloudSync && typeof window.__estoqueCloudSync.save === 'function'){
-    window.__estoqueCloudSync.save(db);
+    window.__estoqueCloudSync.save(db, { immediate: currentTab==='saidasCentral' || currentTab==='saidasFracionado' });
   }
   return true;
 }

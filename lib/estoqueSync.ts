@@ -679,7 +679,7 @@ export function installCloudSync(
   })();
 
   (window as any).__estoqueCloudSync = {
-    save(db: LegacyDB) {
+    save(db: LegacyDB, options?: { immediate?: boolean }) {
       window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(db));
       clearTimeout(timer);
       window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvando" } }));
@@ -733,7 +733,7 @@ export function installCloudSync(
             if (revision === saveRevision) saving = false;
           }, 3000);
         }
-      }, 900);
+      }, options?.immediate ? 0 : 900);
     },
     isSaving() {
       return saving || timer !== undefined;

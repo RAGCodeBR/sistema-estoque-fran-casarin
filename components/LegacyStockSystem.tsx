@@ -21,7 +21,7 @@ declare global {
   interface Window {
     __estoqueFranCasarinLoaded?: boolean;
     __estoqueCloudSync?: {
-      save: (db: unknown) => void;
+      save: (db: unknown, options?: { immediate?: boolean }) => void;
       isSaving: () => boolean;
     };
     __estoqueLegacy?: {
