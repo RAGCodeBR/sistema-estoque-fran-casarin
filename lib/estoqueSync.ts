@@ -685,6 +685,7 @@ export function installCloudSync(
       window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvando" } }));
       const revision = ++saveRevision;
       timer = setTimeout(async () => {
+        timer = undefined;
         saving = true;
         let recoveryDB: LegacyDB | undefined;
         try {
@@ -733,6 +734,9 @@ export function installCloudSync(
           }, 3000);
         }
       }, 900);
+    },
+    isSaving() {
+      return saving || timer !== undefined;
     },
   };
 

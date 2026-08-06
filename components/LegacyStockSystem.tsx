@@ -22,6 +22,7 @@ declare global {
     __estoqueFranCasarinLoaded?: boolean;
     __estoqueCloudSync?: {
       save: (db: unknown) => void;
+      isSaving: () => boolean;
     };
     __estoqueLegacy?: {
       getDB: () => unknown;
@@ -87,6 +88,31 @@ export default function LegacyStockSystem() {
 
     let cancelled = false;
     let channel: ReturnType<typeof installCloudSync> | undefined;
+    let refreshInterval: number | undefined;
+    let refreshWhenVisible: (() => void) | undefined;
+    let refreshingFromCloud = false;
+
+    async function refreshFromCloud(showUpdate = false) {
+      if (cancelled || refreshingFromCloud || window.__estoqueCloudSync?.isSaving()) return;
+      refreshingFromCloud = true;
+      try {
+        const freshDB = await loadLegacyDB(supabase);
+        if (cancelled) return;
+        const currentDB = window.__estoqueLegacy?.getDB();
+        if (currentDB && JSON.stringify(currentDB) === JSON.stringify(freshDB)) return;
+
+        window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(freshDB));
+        if (window.__estoqueLegacy) {
+          window.__estoqueLegacy.replaceDB(freshDB);
+          if (showUpdate) showToast("Atualizado");
+        }
+      } catch (error) {
+        // A próxima atualização em tempo real ou a próxima verificação tentará de novo.
+        console.warn("Não foi possível atualizar o estoque do Supabase.", error);
+      } finally {
+        refreshingFromCloud = false;
+      }
+    }
 
     async function boot(user: User) {
       try {
@@ -108,14 +134,14 @@ export default function LegacyStockSystem() {
         }
         const cloudDB = await loadLegacyDB(supabase);
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cloudDB));
-        channel = installCloudSync(supabase, user, async () => {
-          const freshDB = await loadLegacyDB(supabase);
-          window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(freshDB));
-          if (window.__estoqueLegacy) {
-            window.__estoqueLegacy.replaceDB(freshDB);
-            showToast("Atualizado");
-          }
-        }, perfil.papel === "controle_fracionados" ? "fracionados" : "full");
+        channel = installCloudSync(supabase, user, () => refreshFromCloud(true), perfil.papel === "controle_fracionados" ? "fracionados" : "full");
+
+        refreshWhenVisible = () => {
+          if (document.visibilityState === "visible") void refreshFromCloud();
+        };
+        window.addEventListener("focus", refreshWhenVisible);
+        document.addEventListener("visibilitychange", refreshWhenVisible);
+        refreshInterval = window.setInterval(refreshWhenVisible, 15_000);
 
         const response = await fetch(`${basePath}/legacy-body.html?v=${assetVersion}`, { cache: "no-store" });
         if (!response.ok) throw new Error("Nao foi possivel carregar a interface.");
@@ -144,6 +170,11 @@ export default function LegacyStockSystem() {
     return () => {
       cancelled = true;
       window.removeEventListener("estoque-cloud-status", statusListener);
+      if (refreshWhenVisible) {
+        window.removeEventListener("focus", refreshWhenVisible);
+        document.removeEventListener("visibilitychange", refreshWhenVisible);
+      }
+      if (refreshInterval) window.clearInterval(refreshInterval);
       if (channel) supabase.removeChannel(channel);
     };
   }, [session]);
