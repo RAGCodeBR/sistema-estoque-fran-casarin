@@ -277,7 +277,6 @@
       <button class="navitem" data-tab="seguranca"><span class="dot"></span>Segurança</button>
     </div>
 
-    <button class="resetbtn" id="resetBtn">↺ Restaurar dados de exemplo</button>
   </nav>
   <main id="content"></main>
 </div>
@@ -393,12 +392,6 @@ function showStorageWarning(){
   w.textContent = "Aviso: este navegador não permite salvar os dados localmente (localStorage bloqueado ao abrir o arquivo diretamente). Os lançamentos funcionam normalmente, mas serão perdidos ao fechar a página. Para manter os dados salvos, abra este arquivo por um servidor local ou use Chrome/Edge.";
   document.body.insertBefore(w, document.getElementById('layout'));
 }
-function resetDB(){
-  if(confirm("Isso vai substituir todos os dados atuais pelos dados de exemplo. Continuar?")){
-    db = seedDB(); saveDB(); render();
-  }
-}
-
 /* ============================= HELPERS DE CÁLCULO ============================= */
 function todayStr(){ return new Date().toISOString().slice(0,10); }
 function fmtDate(d){ if(!d) return "—"; const [y,m,dd]=d.split("-"); return `${dd}/${m}/${y}`; }
@@ -456,8 +449,6 @@ let currentTab = "dashboard";
 document.querySelectorAll('.navitem').forEach(btn=>{
   btn.addEventListener('click', ()=>{ currentTab = btn.dataset.tab; render(); closeMobileSidebar(); });
 });
-document.getElementById('resetBtn').addEventListener('click', resetDB);
-
 // Menu hamburguer — em telas estreitas a barra lateral vira um painel deslizante.
 const menuToggleBtn = document.getElementById('menuToggle');
 const sidebarEl = document.getElementById('sidebar');

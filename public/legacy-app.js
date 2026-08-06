@@ -225,12 +225,6 @@ function showStorageWarning(){
   w.textContent = "Aviso: este navegador não permite salvar os dados localmente (localStorage bloqueado ao abrir o arquivo diretamente). Os lançamentos funcionam normalmente, mas serão perdidos ao fechar a página. Para manter os dados salvos, abra este arquivo por um servidor local ou use Chrome/Edge.";
   document.body.insertBefore(w, document.getElementById('layout'));
 }
-function resetDB(){
-  if(confirm("Isso vai substituir todos os dados atuais pelos dados de exemplo. Continuar?")){
-    db = seedDB(); saveDB(); render();
-  }
-}
-
 /* ============================= HELPERS DE CÁLCULO ============================= */
 function todayStr(){ return new Date().toISOString().slice(0,10); }
 function fmtDate(d){ if(!d) return "—"; const [y,m,dd]=d.split("-"); return `${dd}/${m}/${y}`; }
@@ -291,7 +285,6 @@ let currentTab = "dashboard";
 document.querySelectorAll('.navitem[data-tab]').forEach(btn=>{
   btn.addEventListener('click', ()=>{ currentTab = btn.dataset.tab; render(); closeMobileSidebar(); });
 });
-document.getElementById('resetBtn').addEventListener('click', resetDB);
 const logoutBtn = document.getElementById('logoutBtn');
 if(logoutBtn){
   logoutBtn.addEventListener('click', ()=>{
@@ -362,8 +355,6 @@ function setActiveNav(){
     if(items) items.style.display = hasVisibleItem ? '' : 'none';
   });
   expandGroupFor(currentTab);
-  const resetBtn = document.getElementById('resetBtn');
-  if(resetBtn) resetBtn.style.display = canEditSystem() ? '' : 'none';
   const logoutEmail = document.getElementById('logoutEmail');
   if(logoutEmail) logoutEmail.textContent = window.__estoqueSessionEmail || accessProfile().email || '';
   document.querySelectorAll('.navitem[data-tab]').forEach(b=> b.classList.toggle('active', b.dataset.tab===currentTab));
