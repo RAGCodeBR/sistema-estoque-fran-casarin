@@ -439,7 +439,7 @@ const defFracionados = {
     {name:'nome', label:'Nome do Produto Fracionado', type:'text', required:true},
     {name:'categoria', label:'Categoria', type:'select', options:categoriaOptions},
     {name:'unidade', label:'Unidade', type:'select', options:()=>UNIDADES},
-    {name:'origem', label:'Produto Bruto de Origem', type:'select', options:()=>nomesOrdenados(db.brutos), searchable:true},
+    {name:'origem', label:'Produto Bruto de Origem (opcional)', type:'select', options:()=>nomesOrdenados(db.brutos), searchable:true},
     {name:'rendimento', label:'Rendimento Padrão (%)', type:'number', step:'1'},
     {name:'estoqueMinimo', label:'Estoque Mínimo', type:'number', step:'0.01'},
     {name:'validadeDias', label:'Validade Após Fracionar (dias)', type:'number'},
@@ -457,7 +457,6 @@ const defFracionados = {
   validate:(row, editIdx)=>{
     if(!row.nome) return "Informe o nome do produto fracionado.";
     if(db.fracionados.some((f,i)=>i!==editIdx && sameName(f.nome,row.nome))) return "Já existe um produto fracionado com esse nome (considerando também acentos).";
-    if(!row.origem) return "Selecione o produto bruto de origem.";
     return null;
   },
   beforeSave:(row,editIdx)=>{
@@ -609,7 +608,7 @@ const defSaidasCentral = {
 };
 
 const defProducoes = {
-  key:'producoes', title:'Entrada de Fracionados', subtitle:'Selecione o fracionado: o bruto de origem e o saldo disponível na Central são preenchidos automaticamente. Apenas a quantidade utilizada será baixada.', groupByDate:true, searchableTable:true, searchPlaceholder:'Buscar por produto ou data…',
+  key:'producoes', title:'Entrada de Fracionados', subtitle:'Selecione o produto fracionado e o produto bruto disponível na Central. A origem escolhida fica registrada neste lançamento e apenas a quantidade utilizada será baixada.', groupByDate:true, searchableTable:true, searchPlaceholder:'Buscar por produto ou data…',
   fields:[
     {name:'data', label:'Data', type:'date', default:todayStr},
     {name:'produtoFracionado', label:'Produto Fracionado', type:'select', options:()=>nomesOrdenados(db.fracionados), searchable:true},
@@ -634,24 +633,23 @@ const defProducoes = {
   ],
   helper:(form)=>{
     const prodSel = form.querySelector('[name=produtoFracionado]');
-    const brutoSel = form.querySelector('[name=produtoBruto]'); brutoSel.disabled=true;
+    const brutoSel = form.querySelector('[name=produtoBruto]');
     const qtdInput = form.querySelector('[name=quantidadeUtilizada]');
     const hint = document.createElement('div'); hint.className='hint'; hint.id='saldoHintProd';
     qtdInput.closest('.field').appendChild(hint);
     function update(){
-      const f=db.fracionados.find(x=>x.nome===prodSel.value);
-      if(!f){hint.textContent='';brutoSel.value='';return;}
-      brutoSel.value=f.origem||'';
-      const s = saldoCentral(f.origem);
-      hint.textContent = `Disponível na ${getCentralNome()}: ${fmtNum(s)} (${f.origem})`;
+      if(!prodSel.value || !brutoSel.value){hint.textContent='';return;}
+      const s = saldoCentral(brutoSel.value);
+      hint.textContent = `Disponível na ${getCentralNome()}: ${fmtNum(s)} (${brutoSel.value})`;
       hint.className = 'hint' + (exceedsStock(qtdInput.value,s) ? ' warn' : '');
     }
-    prodSel.addEventListener('change', update); qtdInput.addEventListener('input', update); update();
+    prodSel.addEventListener('change', update); brutoSel.addEventListener('change', update); qtdInput.addEventListener('input', update); update();
   },
   validate:(row, editIdx)=>{
     if(!row.produtoFracionado) return "Selecione o produto fracionado.";
     const f=db.fracionados.find(x=>x.nome===row.produtoFracionado); if(!f) return "Produto fracionado inválido.";
-    row.produtoBruto=f.origem; row.origemEstoque='central';
+    if(!row.produtoBruto || !db.brutos.some(x=>x.nome===row.produtoBruto)) return "Selecione o produto bruto de origem disponível na Central.";
+    row.origemEstoque='central';
     if(!row.quantidadeUtilizada || row.quantidadeUtilizada<=0) return "Informe a quantidade utilizada.";
     if(!row.quantidadeProduzida || row.quantidadeProduzida<=0) return "Informe a quantidade produzida.";
     if(!row.unidadeProduzida) row.unidadeProduzida = f.unidade;
@@ -1306,6 +1304,10 @@ function fazerPedidosSelecionados(){
 function concluirProducao(produtoFracionado){
   const f = db.fracionados.find(x=>x.nome===produtoFracionado);
   if(!f) return;
+  if(!f.origem){
+    alert('Escolha o Produto Bruto de Origem ao registrar a Entrada de Fracionados. Este produto não possui uma origem fixa.');
+    return;
+  }
   const saldo = saldoCozinhaFracionado(produtoFracionado);
   const sugestao = Math.max(0, (f.estoqueMinimo||0) - saldo);
   if(sugestao<=0){ alert('Este item já está acima do estoque mínimo — nada a concluir.'); render(); return; }
