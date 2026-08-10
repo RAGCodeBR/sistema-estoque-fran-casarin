@@ -120,6 +120,7 @@ function seedDB(){
     pedidosCompra:[],
     itensManuaisCompra:[],
     ajustesEstoque:[],
+    ajustesFracionados:[],
   };
 }
 
@@ -143,6 +144,7 @@ function normalizeDB(data){
   data.pedidosCompra = data.pedidosCompra || [];
   data.itensManuaisCompra = data.itensManuaisCompra || [];
   data.ajustesEstoque = data.ajustesEstoque || [];
+  data.ajustesFracionados = data.ajustesFracionados || [];
   return data;
 }
 function nameKey(value){
@@ -264,7 +266,8 @@ function saldoLocalBruto(produto, local){
   return roundStock(db.saidasCentral.filter(s=>s.destino===local).reduce((a,r)=> sameName(r.produto,produto) ? a+Number(r.quantidade||0):a,0));
 }
 function saldoCozinhaFracionado(produto){
-  return roundStock(sumWhere(db.producoes,'produtoFracionado',produto,'quantidadeProduzida') - sumWhere(db.saidasFracionado,'produto',produto,'quantidade'));
+  const ajustes = sumWhere(db.ajustesFracionados,'produto',produto,'diferenca');
+  return roundStock(sumWhere(db.producoes,'produtoFracionado',produto,'quantidadeProduzida') - sumWhere(db.saidasFracionado,'produto',produto,'quantidade') + ajustes);
 }
 function saldoLocalFracionado(produto, local){
   return roundStock(db.saidasFracionado.filter(s=>s.destino===local).reduce((a,r)=> sameName(r.produto,produto) ? a+Number(r.quantidade||0):a,0));

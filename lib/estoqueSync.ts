@@ -12,6 +12,7 @@ type LegacyDB = {
   producoes: Array<Record<string, any>>;
   saidasFracionado: Array<Record<string, any>>;
   ajustesEstoque: Array<Record<string, any>>;
+  ajustesFracionados: Array<Record<string, any>>;
   pedidosCompra: Array<Record<string, any>>;
   itensManuaisCompra: string[];
   pedidosFeitos: Record<string, any>;
@@ -46,6 +47,7 @@ const emptyDB = (): LegacyDB => ({
   producoes: [],
   saidasFracionado: [],
   ajustesEstoque: [],
+  ajustesFracionados: [],
   pedidosCompra: [],
   itensManuaisCompra: [],
   pedidosFeitos: {},
@@ -141,6 +143,7 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
     producoes,
     saidasFracionado,
     ajustes,
+    ajustesFracionados,
     pedidos,
     itensManuais,
   ] = await Promise.all([
@@ -153,6 +156,7 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
     selectAll<any>(supabase, "producoes"),
     selectAll<any>(supabase, "saidas_fracionado"),
     selectAll<any>(supabase, "ajustes_estoque"),
+    selectAll<any>(supabase, "ajustes_fracionados"),
     selectAll<any>(supabase, "pedidos_compra"),
     selectAll<any>(supabase, "itens_manuais_compra"),
   ]);
@@ -217,6 +221,15 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
     ajustesEstoque: ajustes.map((a) => ({
       data: a.data,
       produto: brutoPorId.get(a.produto_bruto_id)?.nome ?? "",
+      saldoAnterior: num(a.saldo_anterior),
+      novoSaldo: num(a.novo_saldo),
+      diferenca: num(a.diferenca),
+      motivo: a.motivo ?? "",
+      responsavel: a.responsavel ?? "",
+    })),
+    ajustesFracionados: ajustesFracionados.map((a) => ({
+      data: a.data,
+      produto: fracionadoPorId.get(a.produto_fracionado_id)?.nome ?? "",
       saldoAnterior: num(a.saldo_anterior),
       novoSaldo: num(a.novo_saldo),
       diferenca: num(a.diferenca),
