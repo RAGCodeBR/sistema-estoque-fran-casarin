@@ -10,8 +10,7 @@ import {
   installCloudSync,
   listAuditLogs,
   listPerfis,
-  loadLegacyDB,
-  loadStockRevision,
+  loadConsistentLegacyState,
   resetPerfilPassword,
   STORAGE_KEY,
   updatePerfilUser,
@@ -98,7 +97,7 @@ export default function LegacyStockSystem() {
       if (cancelled || refreshingFromCloud || window.__estoqueCloudSync?.isSaving()) return;
       refreshingFromCloud = true;
       try {
-        const [freshDB, freshRevision] = await Promise.all([loadLegacyDB(supabase), loadStockRevision(supabase)]);
+        const { db: freshDB, revision: freshRevision } = await loadConsistentLegacyState(supabase);
         if (cancelled) return;
         const currentDB = window.__estoqueLegacy?.getDB();
         if (currentDB && JSON.stringify(currentDB) === JSON.stringify(freshDB)) return;
@@ -135,7 +134,7 @@ export default function LegacyStockSystem() {
         if (!perfil.ativo) {
           throw new Error("Este acesso esta bloqueado. Fale com o Master do sistema.");
         }
-        const [cloudDB, cloudRevision] = await Promise.all([loadLegacyDB(supabase), loadStockRevision(supabase)]);
+        const { db: cloudDB, revision: cloudRevision } = await loadConsistentLegacyState(supabase);
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cloudDB));
         channel = installCloudSync(
           supabase,

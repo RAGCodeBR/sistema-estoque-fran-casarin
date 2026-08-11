@@ -363,6 +363,19 @@ export async function loadStockRevision(supabase: SupabaseClient): Promise<numbe
   return Number(data ?? 0);
 }
 
+// loadLegacyDB consulta várias tabelas. A revisão antes e depois da leitura
+// garante que não montaremos uma cópia com parte do banco antes e parte depois
+// da gravação de outro usuário.
+export async function loadConsistentLegacyState(supabase: SupabaseClient): Promise<{ db: LegacyDB; revision: number }> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const revisionBefore = await loadStockRevision(supabase);
+    const db = await loadLegacyDB(supabase);
+    const revisionAfter = await loadStockRevision(supabase);
+    if (revisionBefore === revisionAfter) return { db, revision: revisionAfter };
+  }
+  throw new Error("O estoque está sendo atualizado por outro usuário. Tente novamente em alguns segundos.");
+}
+
 function atomicPayload(db: LegacyDB) {
   return {
     categorias: (db.categorias ?? []).map((x) => ({ nome: x.nome })),
@@ -417,6 +430,14 @@ async function saveLegacyDBAtomically(
   if (error) throw error;
   return Number(data);
 }
+
+function syncErrorInfo(error: unknown) {
+  if (!error || typeof error !== "object") return { message: String(error ?? ""), code: "" };
+  const value = error as { message?: unknown; code?: unknown };
+  return { message: String(value.message ?? ""), code: String(value.code ?? "") };
+}
+
+const wait = (milliseconds: number) => new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
 
 export async function getCurrentPerfil(supabase: SupabaseClient, user: User): Promise<PerfilSistema> {
   const { data, error } = await supabase
@@ -876,8 +897,8 @@ export function installCloudSync(
           // A revisão do banco continua sendo verificada dentro da função SQL.
           // Se alguém gravar no intervalo entre a leitura e a escrita, lemos a
           // versão nova e tentamos novamente, sem descartar a edição local.
-          for (let attempt = 0; attempt < 3; attempt += 1) {
-            const [remoteDB, remoteRevision] = await Promise.all([loadLegacyDB(supabase), loadStockRevision(supabase)]);
+          for (let attempt = 0; attempt < 5; attempt += 1) {
+            const { db: remoteDB, revision: remoteRevision } = await loadConsistentLegacyState(supabase);
             const mergedDB = mergeConcurrentChanges(beforeDB, nextDB, remoteDB, scope);
             assertSafeReplacement(remoteDB, mergedDB);
             assertValidMovements(mergedDB);
@@ -887,9 +908,11 @@ export function installCloudSync(
               savedDB = mergedDB;
               break;
             } catch (saveError) {
-              const message = saveError instanceof Error ? saveError.message.toLowerCase() : "";
-              const revisionConflict = message.includes("outra sessao") || message.includes("outra sessão") || message.includes("revisao") || message.includes("revisão");
-              if (!revisionConflict || attempt === 2) throw saveError;
+              const { message, code } = syncErrorInfo(saveError);
+              const normalizedMessage = message.toLowerCase();
+              const revisionConflict = code === "40001" || normalizedMessage.includes("outra sessao") || normalizedMessage.includes("outra sessão") || normalizedMessage.includes("revisao") || normalizedMessage.includes("revisão");
+              if (!revisionConflict || attempt === 4) throw saveError;
+              await wait(150 * (attempt + 1));
             }
           }
           if (!savedDB) throw new Error("Não foi possível confirmar a gravação do estoque.");
