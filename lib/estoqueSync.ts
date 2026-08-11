@@ -81,6 +81,110 @@ function stableSnapshot(db: LegacyDB) {
   return JSON.stringify(normalize(db));
 }
 
+type ArraySection = Exclude<keyof LegacyDB, "itensManuaisCompra" | "pedidosFeitos">;
+
+const mergeKeyFields: Record<ArraySection, string[]> = {
+  categorias: ["nome"],
+  locais: ["nome"],
+  brutos: ["nome"],
+  fracionados: ["nome"],
+  entradasCentral: ["data", "nf", "produto", "fornecedor", "validade"],
+  saidasCentral: ["data", "documento", "produto", "destino"],
+  producoes: ["data", "produtoBruto", "produtoFracionado"],
+  saidasFracionado: ["data", "documento", "produto", "destino"],
+  ajustesEstoque: ["data", "produto", "motivo", "responsavel"],
+  ajustesFracionados: ["data", "produto", "motivo", "responsavel"],
+  pedidosCompra: ["data", "produto", "fornecedor"],
+};
+
+function sameData(left: unknown, right: unknown) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function recordMap(rows: Array<Record<string, any>>, fields: string[]) {
+  const occurrences = new Map<string, number>();
+  const map = new Map<string, Record<string, any>>();
+  rows.forEach((row, index) => {
+    const baseKey = fields.map((field) => compactValue(row[field])).join("\u001f") || `linha ${index + 1}`;
+    const occurrence = (occurrences.get(baseKey) ?? 0) + 1;
+    occurrences.set(baseKey, occurrence);
+    map.set(`${baseKey}\u001e${occurrence}`, row);
+  });
+  return map;
+}
+
+// O app legado salva o estoque inteiro de uma vez. Para não deixar uma aba
+// antiga apagar o trabalho feito por outra pessoa, aplicamos somente o delta
+// local sobre a cópia mais recente do banco. Quando as duas pessoas mexem no
+// mesmo registro, a última gravação explícita prevalece.
+function mergeArrayChanges(
+  baseRows: Array<Record<string, any>> = [],
+  localRows: Array<Record<string, any>> = [],
+  remoteRows: Array<Record<string, any>> = [],
+  fields: string[],
+  preserveConcurrentAdds = false,
+) {
+  const base = recordMap(baseRows, fields);
+  const local = recordMap(localRows, fields);
+  const merged = recordMap(remoteRows, fields);
+
+  base.forEach((baseRow, key) => {
+    const localRow = local.get(key);
+    if (sameData(baseRow, localRow)) return;
+    if (localRow === undefined) merged.delete(key);
+    else merged.set(key, localRow);
+  });
+  local.forEach((localRow, key) => {
+    if (base.has(key)) return;
+    if (!preserveConcurrentAdds || !merged.has(key)) {
+      merged.set(key, localRow);
+      return;
+    }
+    // Movimentos não têm um identificador estável no formato legado. Se duas
+    // pessoas incluírem registros semelhantes ao mesmo tempo, os dois devem
+    // continuar existindo, em vez de uma inclusão esconder a outra.
+    let concurrentKey = `${key}\u001dlocal`;
+    let sequence = 2;
+    while (merged.has(concurrentKey)) concurrentKey = `${key}\u001dlocal-${sequence++}`;
+    merged.set(concurrentKey, localRow);
+  });
+  return [...merged.values()];
+}
+
+function mergeObjectChanges(base: Record<string, any>, local: Record<string, any>, remote: Record<string, any>) {
+  const merged = { ...remote };
+  const keys = new Set([...Object.keys(base ?? {}), ...Object.keys(local ?? {})]);
+  keys.forEach((key) => {
+    if (sameData(base?.[key], local?.[key])) return;
+    if (!(key in (local ?? {}))) delete merged[key];
+    else merged[key] = local[key];
+  });
+  return merged;
+}
+
+function mergeConcurrentChanges(base: LegacyDB, local: LegacyDB, remote: LegacyDB, scope: SyncScope): LegacyDB {
+  const merged = cloneDB(remote);
+  const sections: ArraySection[] = scope === "fracionados"
+    ? ["producoes", "saidasFracionado"]
+    : Object.keys(mergeKeyFields) as ArraySection[];
+
+  sections.forEach((section) => {
+    const isMovement = ["entradasCentral", "saidasCentral", "producoes", "saidasFracionado", "ajustesEstoque", "ajustesFracionados", "pedidosCompra"].includes(section);
+    merged[section] = mergeArrayChanges(base[section], local[section], remote[section], mergeKeyFields[section], isMovement);
+  });
+  if (scope === "full") {
+    const manual = mergeArrayChanges(
+      (base.itensManuaisCompra ?? []).map((nome) => ({ nome })),
+      (local.itensManuaisCompra ?? []).map((nome) => ({ nome })),
+      (remote.itensManuaisCompra ?? []).map((nome) => ({ nome })),
+      ["nome"],
+    );
+    merged.itensManuaisCompra = manual.map((item) => String(item.nome));
+    merged.pedidosFeitos = mergeObjectChanges(base.pedidosFeitos ?? {}, local.pedidosFeitos ?? {}, remote.pedidosFeitos ?? {});
+  }
+  return merged;
+}
+
 function movementCount(db: LegacyDB) {
   return movementKeys.reduce((total, key) => total + (db[key]?.length ?? 0), 0);
 }
@@ -767,24 +871,39 @@ export function installCloudSync(
         try {
           const nextDB = cloneDB(db);
           const beforeDB = cloneDB(lastSavedDB);
-          const remoteDB = await loadLegacyDB(supabase);
+          let savedDB: LegacyDB | undefined;
 
-          // Nunca permita que uma aba antiga sobrescreva alterações feitas por
-          // outra pessoa. O usuário precisa recarregar e trabalhar sobre a
-          // versão atual do banco.
-          if (stableSnapshot(remoteDB) !== stableSnapshot(beforeDB)) {
-            throw new Error("O estoque foi alterado em outra sessão. Recarregue a página antes de salvar para não sobrescrever dados.");
+          // A revisão do banco continua sendo verificada dentro da função SQL.
+          // Se alguém gravar no intervalo entre a leitura e a escrita, lemos a
+          // versão nova e tentamos novamente, sem descartar a edição local.
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            const [remoteDB, remoteRevision] = await Promise.all([loadLegacyDB(supabase), loadStockRevision(supabase)]);
+            const mergedDB = mergeConcurrentChanges(beforeDB, nextDB, remoteDB, scope);
+            assertSafeReplacement(remoteDB, mergedDB);
+            assertValidMovements(mergedDB);
+            recoveryDB = remoteDB;
+            try {
+              stockRevision = await saveLegacyDBAtomically(supabase, mergedDB, remoteRevision, scope);
+              savedDB = mergedDB;
+              break;
+            } catch (saveError) {
+              const message = saveError instanceof Error ? saveError.message.toLowerCase() : "";
+              const revisionConflict = message.includes("outra sessao") || message.includes("outra sessão") || message.includes("revisao") || message.includes("revisão");
+              if (!revisionConflict || attempt === 2) throw saveError;
+            }
           }
-          assertSafeReplacement(remoteDB, nextDB);
-          assertValidMovements(nextDB);
-          recoveryDB = remoteDB;
-          stockRevision = await saveLegacyDBAtomically(supabase, nextDB, stockRevision, scope);
+          if (!savedDB) throw new Error("Não foi possível confirmar a gravação do estoque.");
           try {
             await insertSystemLog(supabase, user, beforeDB, nextDB);
           } catch (logError) {
             console.warn("Nao foi possivel registrar o log resumido.", logError);
           }
-          lastSavedDB = cloneDB(nextDB);
+          const mergedRemoteChanges = stableSnapshot(savedDB) !== stableSnapshot(nextDB);
+          lastSavedDB = cloneDB(savedDB);
+          if (mergedRemoteChanges) {
+            window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(savedDB));
+            window.__estoqueLegacy?.replaceDB(savedDB);
+          }
           window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
         } catch (error) {
           console.error("Erro ao salvar estoque no Supabase", error);
