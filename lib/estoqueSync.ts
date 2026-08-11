@@ -930,7 +930,9 @@ export function installCloudSync(
           window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
         } catch (error) {
           console.error("Erro ao salvar estoque no Supabase", error);
-          let message = error instanceof Error ? error.message : "Verifique permissao do usuario ou dados obrigatorios.";
+          const errorInfo = syncErrorInfo(error);
+          let message = errorInfo.message || (error instanceof Error ? error.message : "Verifique permissao do usuario ou dados obrigatorios.");
+          if (errorInfo.code && errorInfo.code !== "40001") message = `${message} (código ${errorInfo.code})`;
           if (recoveryDB) {
             try {
               lastSavedDB = cloneDB(recoveryDB);
