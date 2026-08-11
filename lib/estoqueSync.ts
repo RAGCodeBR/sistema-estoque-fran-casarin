@@ -253,6 +253,67 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
   };
 }
 
+export async function loadStockRevision(supabase: SupabaseClient): Promise<number> {
+  const { data, error } = await supabase.rpc("obter_revisao_estoque");
+  if (error) throw error;
+  return Number(data ?? 0);
+}
+
+function atomicPayload(db: LegacyDB) {
+  return {
+    categorias: (db.categorias ?? []).map((x) => ({ nome: x.nome })),
+    locais: (db.locais ?? []).map((x) => ({ nome: x.nome, tipo: x.tipo, responsavel: x.responsavel })),
+    brutos: (db.brutos ?? []).map((x) => ({
+      nome: x.nome, categoria: x.categoria, unidade: x.unidade, estoque_minimo: num(x.estoqueMinimo), fornecedor: x.fornecedor,
+      preco_medio: num(x.precoMedio), validade_dias: num(x.validadeDias),
+    })),
+    fracionados: (db.fracionados ?? []).map((x) => ({
+      nome: x.nome, categoria: x.categoria, unidade: x.unidade, origem: x.origem, rendimento: num(x.rendimento),
+      estoque_minimo: num(x.estoqueMinimo), validade_dias: num(x.validadeDias),
+    })),
+    entradasCentral: (db.entradasCentral ?? []).map((x) => ({
+      data: x.data, nf: x.nf, produto: x.produto, fornecedor: x.fornecedor, quantidade: num(x.quantidade),
+      preco_unitario: num(x.precoUnitario), validade: x.validade,
+    })),
+    saidasCentral: (db.saidasCentral ?? []).map((x) => ({ data: x.data, documento: x.documento, produto: x.produto, destino: x.destino, quantidade: num(x.quantidade) })),
+    producoes: (db.producoes ?? []).map((x) => ({
+      data: x.data, produto_bruto: x.produtoBruto, quantidade_utilizada: num(x.quantidadeUtilizada),
+      produto_fracionado: x.produtoFracionado, quantidade_produzida: num(x.quantidadeProduzida),
+    })),
+    saidasFracionado: (db.saidasFracionado ?? []).map((x) => ({ data: x.data, documento: x.documento, produto: x.produto, destino: x.destino, quantidade: num(x.quantidade) })),
+    ajustesEstoque: (db.ajustesEstoque ?? []).map((x) => ({
+      data: x.data, produto: x.produto, saldo_anterior: num(x.saldoAnterior), novo_saldo: num(x.novoSaldo),
+      diferenca: num(x.diferenca), motivo: x.motivo, responsavel: x.responsavel,
+    })),
+    ajustesFracionados: (db.ajustesFracionados ?? []).map((x) => ({
+      data: x.data, produto: x.produto, saldo_anterior: num(x.saldoAnterior), novo_saldo: num(x.novoSaldo),
+      diferenca: num(x.diferenca), motivo: x.motivo, responsavel: x.responsavel,
+    })),
+    pedidosCompra: (db.pedidosCompra ?? []).map((x) => ({
+      data: x.data, produto: x.produto, fornecedor: x.fornecedor, quantidade_pedida: num(x.quantidadePedida),
+      preco_estimado: num(x.precoEstimado), status: x.status, data_recebimento: x.dataRecebimento,
+      quantidade_recebida: x.quantidadeRecebida == null ? null : num(x.quantidadeRecebida),
+      preco_recebido: x.precoRecebido == null ? null : num(x.precoRecebido),
+    })),
+    itensManuaisCompra: db.itensManuaisCompra ?? [],
+  };
+}
+
+async function saveLegacyDBAtomically(
+  supabase: SupabaseClient,
+  db: LegacyDB,
+  expectedRevision: number,
+  scope: SyncScope,
+): Promise<number> {
+  const { data, error } = await supabase.rpc("sincronizar_estoque_atomico", {
+    p_dados: atomicPayload(db),
+    p_revisao_esperada: expectedRevision,
+    p_escopo: scope,
+  });
+  if (error) throw error;
+  return Number(data);
+}
+
 export async function getCurrentPerfil(supabase: SupabaseClient, user: User): Promise<PerfilSistema> {
   const { data, error } = await supabase
     .from("perfis")
@@ -678,9 +739,11 @@ export function installCloudSync(
   user: User,
   onRemoteChange: () => void,
   scope: SyncScope = "full",
+  initialRevision = 0,
 ): RealtimeChannel {
   let saving = false;
   let saveRevision = 0;
+  let stockRevision = initialRevision;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let remoteTimer: ReturnType<typeof setTimeout> | undefined;
   let lastSavedDB: LegacyDB = (() => {
@@ -714,9 +777,8 @@ export function installCloudSync(
           }
           assertSafeReplacement(remoteDB, nextDB);
           assertValidMovements(nextDB);
-          await createCheckpoint(supabase, user, remoteDB);
           recoveryDB = remoteDB;
-          await saveLegacyDB(supabase, user, nextDB, scope);
+          stockRevision = await saveLegacyDBAtomically(supabase, nextDB, stockRevision, scope);
           try {
             await insertSystemLog(supabase, user, beforeDB, nextDB);
           } catch (logError) {
@@ -729,13 +791,13 @@ export function installCloudSync(
           let message = error instanceof Error ? error.message : "Verifique permissao do usuario ou dados obrigatorios.";
           if (recoveryDB) {
             try {
-              await saveLegacyDB(supabase, user, recoveryDB, scope);
               lastSavedDB = cloneDB(recoveryDB);
               window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(recoveryDB));
-              message = `${message} O ponto de recuperação foi restaurado automaticamente.`;
+              window.__estoqueLegacy?.replaceDB(recoveryDB);
+              message = `${message} A cópia local foi restaurada para a versão atual do banco.`;
             } catch (restoreError) {
-              console.error("Erro ao restaurar o ponto de recuperação", restoreError);
-              message = `${message} A gravação foi interrompida; o checkpoint foi preservado para restauração.`;
+              console.error("Erro ao restaurar a cópia local", restoreError);
+              message = `${message} A gravação foi interrompida.`;
             }
           }
           window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "erro", message } }));
@@ -750,6 +812,9 @@ export function installCloudSync(
     },
     isSaving() {
       return saving || timer !== undefined;
+    },
+    setRevision(revision: number) {
+      stockRevision = revision;
     },
   };
 

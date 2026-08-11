@@ -11,6 +11,7 @@ import {
   listAuditLogs,
   listPerfis,
   loadLegacyDB,
+  loadStockRevision,
   resetPerfilPassword,
   STORAGE_KEY,
   updatePerfilUser,
@@ -23,6 +24,7 @@ declare global {
     __estoqueCloudSync?: {
       save: (db: unknown, options?: { immediate?: boolean }) => void;
       isSaving: () => boolean;
+      setRevision: (revision: number) => void;
     };
     __estoqueLegacy?: {
       getDB: () => unknown;
@@ -96,12 +98,13 @@ export default function LegacyStockSystem() {
       if (cancelled || refreshingFromCloud || window.__estoqueCloudSync?.isSaving()) return;
       refreshingFromCloud = true;
       try {
-        const freshDB = await loadLegacyDB(supabase);
+        const [freshDB, freshRevision] = await Promise.all([loadLegacyDB(supabase), loadStockRevision(supabase)]);
         if (cancelled) return;
         const currentDB = window.__estoqueLegacy?.getDB();
         if (currentDB && JSON.stringify(currentDB) === JSON.stringify(freshDB)) return;
 
         window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(freshDB));
+        window.__estoqueCloudSync?.setRevision(freshRevision);
         if (window.__estoqueLegacy) {
           window.__estoqueLegacy.replaceDB(freshDB);
           if (showUpdate) showToast("Atualizado");
@@ -132,9 +135,15 @@ export default function LegacyStockSystem() {
         if (!perfil.ativo) {
           throw new Error("Este acesso esta bloqueado. Fale com o Master do sistema.");
         }
-        const cloudDB = await loadLegacyDB(supabase);
+        const [cloudDB, cloudRevision] = await Promise.all([loadLegacyDB(supabase), loadStockRevision(supabase)]);
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cloudDB));
-        channel = installCloudSync(supabase, user, () => refreshFromCloud(true), perfil.papel === "controle_fracionados" ? "fracionados" : "full");
+        channel = installCloudSync(
+          supabase,
+          user,
+          () => refreshFromCloud(true),
+          perfil.papel === "controle_fracionados" ? "fracionados" : "full",
+          cloudRevision,
+        );
 
         refreshWhenVisible = () => {
           if (document.visibilityState === "visible") void refreshFromCloud();
