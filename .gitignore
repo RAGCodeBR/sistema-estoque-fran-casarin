@@ -8,3 +8,4 @@ node_modules/
 out/
 tsconfig.tsbuildinfo
 .env*.local
+supabase/.temp/

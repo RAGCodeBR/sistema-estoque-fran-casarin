@@ -167,6 +167,32 @@ function renameFracionadoReferences(oldName,newName){
   (db.producoes||[]).forEach(x=>x.produtoFracionado=replaceExactName(x.produtoFracionado,oldName,newName));
   (db.saidasFracionado||[]).forEach(x=>x.produto=replaceExactName(x.produto,oldName,newName));
 }
+function deletionBlockMessage(nome, dependencias){
+  const usadas = dependencias.filter(x=>x.quantidade>0);
+  if(usadas.length===0) return null;
+  const resumo = usadas.map(x=>`${x.quantidade} ${x.rotulo}`).join(', ');
+  return `Não é possível excluir "${nome}", pois ele possui histórico vinculado: ${resumo}. Exclua ou corrija esses registros antes de remover o produto.`;
+}
+function brutoCanDelete(row){
+  const nome=row.nome;
+  return deletionBlockMessage(nome,[
+    {rotulo:'entrada(s)', quantidade:(db.entradasCentral||[]).filter(x=>sameName(x.produto,nome)).length},
+    {rotulo:'saída(s) da Central', quantidade:(db.saidasCentral||[]).filter(x=>sameName(x.produto,nome)).length},
+    {rotulo:'produção(ões)', quantidade:(db.producoes||[]).filter(x=>sameName(x.produtoBruto,nome)).length},
+    {rotulo:'ajuste(s) de estoque', quantidade:(db.ajustesEstoque||[]).filter(x=>sameName(x.produto,nome)).length},
+    {rotulo:'pedido(s) de compra', quantidade:(db.pedidosCompra||[]).filter(x=>sameName(x.produto,nome)).length},
+    {rotulo:'produto(s) fracionado(s) de origem', quantidade:(db.fracionados||[]).filter(x=>sameName(x.origem,nome)).length},
+    {rotulo:'item(ns) manual(is) de compra', quantidade:(db.itensManuaisCompra||[]).filter(x=>sameName(x,nome)).length},
+  ]);
+}
+function fracionadoCanDelete(row){
+  const nome=row.nome;
+  return deletionBlockMessage(nome,[
+    {rotulo:'produção(ões)', quantidade:(db.producoes||[]).filter(x=>sameName(x.produtoFracionado,nome)).length},
+    {rotulo:'saída(s) de fracionados', quantidade:(db.saidasFracionado||[]).filter(x=>sameName(x.produto,nome)).length},
+    {rotulo:'ajuste(s) de fracionados', quantidade:(db.ajustesFracionados||[]).filter(x=>sameName(x.produto,nome)).length},
+  ]);
+}
 function captureCurrentDraft(){
   const form=document.querySelector(`#form-${currentTab}`);
   if(!form) return null;
@@ -433,7 +459,8 @@ const defBrutos = {
   },
   beforeSave:(row,editIdx)=>{
     if(editIdx!=null) renameBrutoReferences(db.brutos[editIdx] && db.brutos[editIdx].nome,row.nome);
-  }
+  },
+  canDelete:brutoCanDelete
 };
 
 const defFracionados = {
@@ -464,7 +491,8 @@ const defFracionados = {
   },
   beforeSave:(row,editIdx)=>{
     if(editIdx!=null) renameFracionadoReferences(db.fracionados[editIdx] && db.fracionados[editIdx].nome,row.nome);
-  }
+  },
+  canDelete:fracionadoCanDelete
 };
 
 const defLocais = {

@@ -24,7 +24,11 @@ drop policy if exists "checkpoints_admin_insert" on public.estoque_checkpoints;
 create policy "checkpoints_admin_insert" on public.estoque_checkpoints
 for insert to authenticated
 with check (
-  public.usuario_tem_papel(array['master','administrador'])
+  -- O Controle de Fracionados tambem registra producoes e saidas. A
+  -- sincronizacao dessas movimentacoes cria um checkpoint antes de gravar;
+  -- sem esta permissao o lancamento ficava apenas no navegador e era
+  -- substituido pela proxima atualizacao do banco.
+  public.usuario_tem_papel(array['master','administrador','controle_fracionados'])
   and criado_por = auth.uid()
 );
 
