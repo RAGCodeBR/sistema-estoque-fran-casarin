@@ -100,14 +100,14 @@ begin
     left join public.produtos_brutos b on b.nome = x.origem
     on conflict (nome) do update set categoria_id = excluded.categoria_id, unidade = excluded.unidade, origem_bruto_id = excluded.origem_bruto_id, rendimento_percent = excluded.rendimento_percent, estoque_minimo = excluded.estoque_minimo, validade_dias = excluded.validade_dias, ativo = true;
 
-    delete from public.itens_manuais_compra;
-    delete from public.pedidos_compra;
-    delete from public.ajustes_fracionados;
-    delete from public.ajustes_estoque;
-    delete from public.saidas_fracionado;
-    delete from public.producoes;
-    delete from public.saidas_central;
-    delete from public.entradas_central;
+    delete from public.itens_manuais_compra where true;
+    delete from public.pedidos_compra where true;
+    delete from public.ajustes_fracionados where true;
+    delete from public.ajustes_estoque where true;
+    delete from public.saidas_fracionado where true;
+    delete from public.producoes where true;
+    delete from public.saidas_central where true;
+    delete from public.entradas_central where true;
 
     delete from public.produtos_fracionados pf where not exists (
       select 1 from jsonb_to_recordset(coalesce(p_dados->'fracionados', '[]'::jsonb)) as x(nome text) where x.nome = pf.nome
@@ -139,8 +139,8 @@ begin
 
   if p_escopo in ('full', 'fracionados') then
     if p_escopo = 'fracionados' then
-      delete from public.saidas_fracionado;
-      delete from public.producoes;
+      delete from public.saidas_fracionado where true;
+      delete from public.producoes where true;
     end if;
 
     insert into public.producoes(data, produto_bruto_id, quantidade_utilizada, produto_fracionado_id, quantidade_produzida, criado_por)
