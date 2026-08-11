@@ -813,7 +813,8 @@ export function installCloudSync(
     isSaving() {
       return saving || timer !== undefined;
     },
-    setRevision(revision: number) {
+    setRemoteState(db: LegacyDB, revision: number) {
+      lastSavedDB = cloneDB(db);
       stockRevision = revision;
     },
   };

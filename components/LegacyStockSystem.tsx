@@ -24,7 +24,7 @@ declare global {
     __estoqueCloudSync?: {
       save: (db: unknown, options?: { immediate?: boolean }) => void;
       isSaving: () => boolean;
-      setRevision: (revision: number) => void;
+      setRemoteState: (db: unknown, revision: number) => void;
     };
     __estoqueLegacy?: {
       getDB: () => unknown;
@@ -104,7 +104,7 @@ export default function LegacyStockSystem() {
         if (currentDB && JSON.stringify(currentDB) === JSON.stringify(freshDB)) return;
 
         window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(freshDB));
-        window.__estoqueCloudSync?.setRevision(freshRevision);
+        window.__estoqueCloudSync?.setRemoteState(freshDB, freshRevision);
         if (window.__estoqueLegacy) {
           window.__estoqueLegacy.replaceDB(freshDB);
           if (showUpdate) showToast("Atualizado");
