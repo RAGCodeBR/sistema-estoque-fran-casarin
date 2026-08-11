@@ -910,6 +910,18 @@ export function installCloudSync(
             } catch (saveError) {
               const { message, code } = syncErrorInfo(saveError);
               const normalizedMessage = message.toLowerCase();
+              const safeDeleteBlocked = code === "21000" && normalizedMessage.includes("delete requires a where clause");
+              if (safeDeleteBlocked) {
+                // Alguns projetos Supabase ativam a proteção pg_safeupdate,
+                // que rejeita o DELETE interno da função SQL antiga. A rota
+                // abaixo usa somente deletes com filtro explícito e mantém o
+                // sistema operante até a função do banco ser atualizada.
+                await createCheckpoint(supabase, user, remoteDB);
+                await saveLegacyDB(supabase, user, mergedDB, scope);
+                stockRevision = remoteRevision;
+                savedDB = mergedDB;
+                break;
+              }
               const revisionConflict = code === "40001" || normalizedMessage.includes("outra sessao") || normalizedMessage.includes("outra sessão") || normalizedMessage.includes("revisao") || normalizedMessage.includes("revisão");
               if (!revisionConflict || attempt === 4) throw saveError;
               await wait(150 * (attempt + 1));
