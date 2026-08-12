@@ -169,6 +169,13 @@ function renameFracionadoReferences(oldName,newName){
   (db.producoes||[]).forEach(x=>x.produtoFracionado=replaceExactName(x.produtoFracionado,oldName,newName));
   (db.saidasFracionado||[]).forEach(x=>x.produto=replaceExactName(x.produto,oldName,newName));
 }
+function renameCategoriaReferences(oldName,newName){
+  if(!oldName || oldName===newName) return;
+  // A categoria é gravada como nome no estado legado. Atualizar os produtos
+  // junto evita que a sincronização recrie a categoria antiga após a edição.
+  (db.brutos||[]).forEach(x=>x.categoria=replaceExactName(x.categoria,oldName,newName));
+  (db.fracionados||[]).forEach(x=>x.categoria=replaceExactName(x.categoria,oldName,newName));
+}
 function deletionBlockMessage(nome, dependencias){
   const usadas = dependencias.filter(x=>x.quantidade>0);
   if(usadas.length===0) return null;
@@ -403,7 +410,7 @@ function render(){
   const c = document.getElementById('content');
   const renderers = {
     dashboard: renderDashboard, estoqueCentral: renderEstoqueCentral, estoqueFracionados: renderEstoqueFracionados, compras: renderCompras, alertas: renderAlertas,
-    relatorios: renderRelatorios, backup: renderBackup, importarNF: renderImportarNF, importarXML: renderImportarXML,
+    relatorios: renderRelatorios, backup: renderBackup, importacao: renderImportacao,
     conferenciaPedidos: renderConferenciaPedidos, seguranca: renderSeguranca,
     usuarios: renderUsuarios,
     brutos: ()=>renderCrud(defBrutos), fracionados: ()=>renderCrud(defFracionados), locais: ()=>renderCrud(defLocais),
@@ -513,7 +520,7 @@ const defLocais = {
 };
 
 const defCategorias = {
-  key:'categorias', title:'Categorias', subtitle:'Categorias usadas no cadastro de Produtos Brutos e Fracionados. Uma categoria nova cadastrada aqui já aparece nos formulários automaticamente.',
+  key:'categorias', title:'Categorias', subtitle:'Categorias usadas no cadastro de Produtos Brutos e Fracionados. Uma categoria nova cadastrada aqui já aparece nos formulários automaticamente.', sortRows:r=>r.nome,
   fields:[
     {name:'nome', label:'Nome da Categoria', type:'text', required:true},
   ],
@@ -526,6 +533,9 @@ const defCategorias = {
     if(!row.nome) return "Informe o nome da categoria.";
     if(db.categorias.some((c,i)=>i!==editIdx && c.nome.toLowerCase()===row.nome.toLowerCase())) return "Já existe uma categoria com esse nome.";
     return null;
+  },
+  beforeSave:(row,editIdx)=>{
+    if(editIdx!=null) renameCategoriaReferences(db.categorias[editIdx] && db.categorias[editIdx].nome,row.nome);
   },
   canDelete:(row)=>{
     const emUso = db.brutos.filter(b=>b.categoria===row.nome).length + db.fracionados.filter(f=>f.categoria===row.nome).length;
@@ -1021,10 +1031,10 @@ function renderEstoqueCentral(){
   const c = document.getElementById('content');
   let html = `<h1 class="pagetitle">Estoque Central</h1><p class="pagesub">Saldo dos produtos brutos na Central de Distribuição, calculado automaticamente.</p>`;
   html += `<div class="card"><h2>Produtos Brutos — Saldo na ${getCentralNome()}</h2>${screenSearchTool('estoqueCentral', 'Buscar produto, categoria ou unidade…')}<table><thead><tr>
-    <th>Produto</th><th>Unidade</th><th>Saldo Atual</th><th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>`;
+    <th>Produto</th><th>Categoria</th><th>Unidade</th><th>Saldo Atual</th><th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>`;
   [...db.brutos].sort((a,b)=>compareText(a.nome,b.nome)).forEach(b=>{
     const s = saldoCentral(b.nome);
-    html += `<tr class="screen-search-row"><td><strong>${b.nome}</strong></td><td>${b.unidade}</td><td>${fmtNum(s)}</td><td>${fmtNum(b.estoqueMinimo)}</td><td>${statusBadge(s,b.estoqueMinimo)}</td></tr>`;
+    html += `<tr class="screen-search-row"><td><strong>${b.nome}</strong></td><td>${b.categoria||"—"}</td><td>${b.unidade}</td><td>${fmtNum(s)}</td><td>${fmtNum(b.estoqueMinimo)}</td><td>${statusBadge(s,b.estoqueMinimo)}</td></tr>`;
   });
   html += `</tbody></table></div>`;
   c.innerHTML = html;
@@ -1034,10 +1044,10 @@ function renderEstoqueFracionados(){
   const c = document.getElementById('content');
   let html = `<h1 class="pagetitle">Estoque Fracionados</h1><p class="pagesub">Saldo dos produtos preparados e fracionados, calculado automaticamente.</p>`;
   html += `<div class="card"><h2>Produtos Fracionados - Saldo produzido</h2>${screenSearchTool('estoqueFracionados', 'Buscar produto, origem, categoria ou unidade…')}<table><thead><tr>
-    <th>Produto</th><th>Unidade</th><th>Saldo Atual</th><th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>`;
+    <th>Produto</th><th>Categoria</th><th>Unidade</th><th>Saldo Atual</th><th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>`;
   [...db.fracionados].sort((a,b)=>compareText(a.nome,b.nome)).forEach(f=>{
     const s = saldoCozinhaFracionado(f.nome);
-    html += `<tr class="screen-search-row"><td><strong>${f.nome}</strong></td><td>${f.unidade}</td><td>${fmtNum(s)}</td><td>${fmtNum(f.estoqueMinimo)}</td><td>${statusBadge(s,f.estoqueMinimo)}</td></tr>`;
+    html += `<tr class="screen-search-row"><td><strong>${f.nome}</strong></td><td>${f.categoria||"—"}</td><td>${f.unidade}</td><td>${fmtNum(s)}</td><td>${fmtNum(f.estoqueMinimo)}</td><td>${statusBadge(s,f.estoqueMinimo)}</td></tr>`;
   });
   html += `</tbody></table></div>`;
   c.innerHTML = html;
@@ -2242,6 +2252,14 @@ function renderBackup(){
 
 /* ============================= IMPORTAR NOTA FISCAL (PDF) ============================= */
 let nfImport = null; // {fileName, rawText, header:{fornecedor,nf,data}, itens:[...]}
+function renderImportacao(){
+  const c = document.getElementById('content');
+  c.innerHTML = `<h1 class="pagetitle">Importação</h1><p class="pagesub">Importe uma nota fiscal em PDF ou XML para ler os produtos e lançar a entrada na Central.</p>
+    <section id="importacaoPdf"></section>
+    <section id="importacaoXml" style="margin-top:28px"></section>`;
+  renderImportarNF(c.querySelector('#importacaoPdf'), true);
+  renderImportarXML(c.querySelector('#importacaoXml'), true);
+}
 
 function loadPdfJS(callback){
   if(window.pdfjsLib){ callback(); return; }
@@ -2377,9 +2395,9 @@ function updateNFRowTotal(i){
   if(cell) cell.textContent = fmtMoney(nfImport.itens[i].quantidade * nfImport.itens[i].valorUnitario);
 }
 
-function renderImportarNF(){
-  const c = document.getElementById('content');
-  let html = `<h1 class="pagetitle">Importar Nota Fiscal (PDF)</h1><p class="pagesub">Envie o PDF da nota fiscal eletrônica (NF-e/DANFE) para ler os produtos automaticamente e lançar a entrada na Central.</p>`;
+function renderImportarNF(container, embedded=false){
+  const c = container || document.getElementById('content');
+  let html = embedded ? `<h2 style="margin:0 0 8px">Importar Nota Fiscal (PDF)</h2><p class="pagesub" style="margin-bottom:16px">Envie o PDF da nota fiscal eletrônica (NF-e/DANFE) para ler os produtos automaticamente e lançar a entrada na Central.</p>` : `<h1 class="pagetitle">Importar Nota Fiscal (PDF)</h1><p class="pagesub">Envie o PDF da nota fiscal eletrônica (NF-e/DANFE) para ler os produtos automaticamente e lançar a entrada na Central.</p>`;
 
   html += `<div class="card"><h2>1. Selecione o PDF</h2>
     <div class="field" style="max-width:420px">
@@ -2621,11 +2639,10 @@ function avisoNotaDuplicadaHtml(duplicada){
     Nota fiscal já importada e concluída no sistema. NF <strong>${escapeHtml(duplicada.nf||'sem número')}</strong>${duplicada.fornecedor ? ` de <strong>${escapeHtml(duplicada.fornecedor)}</strong>` : ''} já consta na Entrada da Central${duplicada.data ? ` em <strong>${fmtDate(duplicada.data)}</strong>` : ''}. Esta importação foi bloqueada para evitar duplicidade.${produtos}
   </div>`;
 }
-function renderImportarXML(){
-  const c = document.getElementById('content');
+function renderImportarXML(container, embedded=false){
+  const c = container || document.getElementById('content');
   const notaDuplicada = xmlImport ? findNotaJaLancada(xmlImport.header) : null;
-  let html = `<h1 class="pagetitle">Importar Nota Fiscal (XML) <span class="beta-note">BETA EM TESTES</span></h1>
-    <p class="pagesub">Envie o XML da NF-e para testar a leitura automática de itens, quantidade e preço de custo. A parte financeira/fiscal completa ainda não entra neste fluxo.</p>`;
+  let html = embedded ? `<h2 style="margin:0 0 8px">Importar Nota Fiscal (XML)</h2><p class="pagesub" style="margin-bottom:16px">Envie o XML da NF-e para testar a leitura automática de itens, quantidade e preço de custo.</p>` : `<h1 class="pagetitle">Importar Nota Fiscal (XML)</h1><p class="pagesub">Envie o XML da NF-e para testar a leitura automática de itens, quantidade e preço de custo.</p>`;
 
   html += `<div class="card"><h2>1. Selecione o XML</h2>
     <div class="field" style="max-width:420px">
@@ -2919,7 +2936,7 @@ initLock();
       const q=searchText(query);
       const filtered=all.filter(item=>!q || searchText([item.nome,item.unidade,item.categoria].join(' ')).includes(q));
       const shown=filtered.slice(0,limit);
-      c.innerHTML='<h1 class="pagetitle">'+title+'</h1><p class="pagesub">'+subtitle+'</p><div class="card"><h2>'+heading+'</h2>'+screenSearchTool(key,'Buscar produto, categoria ou unidade…')+'<p class="footnote" id="mobile-stock-count"></p><table><thead><tr><th>Produto</th><th>Unidade</th><th>Saldo Atual</th><th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>'+shown.map(item=>{const atual=saldo(item);return '<tr class="screen-search-row"><td><strong>'+escapeHtml(item.nome)+'</strong></td><td>'+escapeHtml(item.unidade||'—')+'</td><td>'+fmtNum(atual)+'</td><td>'+fmtNum(item.estoqueMinimo)+'</td><td>'+statusBadge(atual,item.estoqueMinimo)+'</td></tr>';}).join('')+'</tbody></table>'+(shown.length<filtered.length?'<button type="button" class="btn secondary" id="mobile-more-'+key+'">Mostrar mais ('+(filtered.length-shown.length)+')</button>':'')+'</div>';
+      c.innerHTML='<h1 class="pagetitle">'+title+'</h1><p class="pagesub">'+subtitle+'</p><div class="card"><h2>'+heading+'</h2>'+screenSearchTool(key,'Buscar produto, categoria ou unidade…')+'<p class="footnote" id="mobile-stock-count"></p><table><thead><tr><th>Produto</th><th>Categoria</th><th>Unidade</th><th>Saldo Atual</th><th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>'+shown.map(item=>{const atual=saldo(item);return '<tr class="screen-search-row"><td><strong>'+escapeHtml(item.nome)+'</strong></td><td>'+escapeHtml(item.categoria||'—')+'</td><td>'+escapeHtml(item.unidade||'—')+'</td><td>'+fmtNum(atual)+'</td><td>'+fmtNum(item.estoqueMinimo)+'</td><td>'+statusBadge(atual,item.estoqueMinimo)+'</td></tr>';}).join('')+'</tbody></table>'+(shown.length<filtered.length?'<button type="button" class="btn secondary" id="mobile-more-'+key+'">Mostrar mais ('+(filtered.length-shown.length)+')</button>':'')+'</div>';
       c.querySelector('#mobile-stock-count').textContent='Mostrando '+shown.length+' de '+filtered.length+' produto(s).';
       const input=c.querySelector('#screen-search-'+key);
       input.value=query;
@@ -2944,7 +2961,7 @@ initLock();
       const q=searchText(query);
       const filtered=all.filter(item=>!q||searchText([item.nome,item.unidade,item.categoria].join(' ')).includes(q));
       const shown=filtered.slice(0,limit);
-      c.innerHTML='<h1 class="pagetitle">'+title+'</h1><p class="pagesub">'+subtitle+'</p><div class="card"><h2>'+heading+'</h2>'+screenSearchTool(key,'Buscar produto, categoria ou unidade…')+'<p class="footnote" id="paged-stock-count"></p><table><thead><tr><th>Produto</th><th>Unidade</th><th>Saldo Atual</th><th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>'+shown.map(item=>{const atual=saldo(item);return '<tr class="screen-search-row"><td><strong>'+escapeHtml(item.nome)+'</strong></td><td>'+escapeHtml(item.unidade||'—')+'</td><td>'+fmtNum(atual)+'</td><td>'+fmtNum(item.estoqueMinimo)+'</td><td>'+statusBadge(atual,item.estoqueMinimo)+'</td></tr>';}).join('')+'</tbody></table>'+(shown.length<filtered.length?'<button type="button" class="btn secondary" id="paged-more-'+key+'">Mostrar mais ('+(filtered.length-shown.length)+')</button>':'')+'</div>';
+      c.innerHTML='<h1 class="pagetitle">'+title+'</h1><p class="pagesub">'+subtitle+'</p><div class="card"><h2>'+heading+'</h2>'+screenSearchTool(key,'Buscar produto, categoria ou unidade…')+'<p class="footnote" id="paged-stock-count"></p><table><thead><tr><th>Produto</th><th>Categoria</th><th>Unidade</th><th>Saldo Atual</th><th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>'+shown.map(item=>{const atual=saldo(item);return '<tr class="screen-search-row"><td><strong>'+escapeHtml(item.nome)+'</strong></td><td>'+escapeHtml(item.categoria||'—')+'</td><td>'+escapeHtml(item.unidade||'—')+'</td><td>'+fmtNum(atual)+'</td><td>'+fmtNum(item.estoqueMinimo)+'</td><td>'+statusBadge(atual,item.estoqueMinimo)+'</td></tr>';}).join('')+'</tbody></table>'+(shown.length<filtered.length?'<button type="button" class="btn secondary" id="paged-more-'+key+'">Mostrar mais ('+(filtered.length-shown.length)+')</button>':'')+'</div>';
       c.querySelector('#paged-stock-count').textContent='Mostrando '+shown.length+' de '+filtered.length+' produto(s).';
       const input=c.querySelector('#screen-search-'+key);input.value=query;
       input.addEventListener('input',()=>{
