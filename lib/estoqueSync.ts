@@ -166,6 +166,8 @@ function mergeConcurrentChanges(base: LegacyDB, local: LegacyDB, remote: LegacyD
   const merged = cloneDB(remote);
   const sections: ArraySection[] = scope === "fracionados"
     ? ["producoes", "saidasFracionado"]
+    : scope === "controle_fracionados_ampliado"
+      ? ["fracionados", "saidasCentral", "producoes", "saidasFracionado"]
     : Object.keys(mergeKeyFields) as ArraySection[];
 
   sections.forEach((section) => {
@@ -553,7 +555,7 @@ async function upsertReturning<T>(supabase: SupabaseClient, table: string, rows:
   return (data ?? []) as T[];
 }
 
-export type SyncScope = "full" | "fracionados";
+export type SyncScope = "full" | "fracionados" | "controle_fracionados_ampliado";
 
 async function saveFracionadosMovements(supabase: SupabaseClient, user: User, db: LegacyDB) {
   // O Controle de Fracionados só pode registrar os movimentos da sua área.
@@ -591,9 +593,72 @@ async function saveFracionadosMovements(supabase: SupabaseClient, user: User, db
   })));
 }
 
+async function saveFracionadosExpanded(supabase: SupabaseClient, user: User, db: LegacyDB) {
+  const [categorias, brutos, locais] = await Promise.all([
+    selectAll<any>(supabase, "categorias", "id,nome"),
+    selectAll<any>(supabase, "produtos_brutos", "id,nome"),
+    selectAll<any>(supabase, "locais", "id,nome"),
+  ]);
+  const categoriaMap = byName(categorias);
+  const brutoMap = byName(brutos);
+  const localMap = byName(locais);
+
+  await Promise.all([
+    deleteAll(supabase, "saidas_fracionado"),
+    deleteAll(supabase, "producoes"),
+    deleteAll(supabase, "saidas_central"),
+  ]);
+  await deleteMissingByName(supabase, "produtos_fracionados", (db.fracionados ?? []).map((p) => p.nome).filter(Boolean));
+  const fracionados = await upsertReturning<any>(
+    supabase,
+    "produtos_fracionados",
+    (db.fracionados ?? []).map((p) => ({
+      nome: p.nome,
+      categoria_id: categoriaMap.get(p.categoria)?.id ?? null,
+      unidade: p.unidade || "UN",
+      origem_bruto_id: brutoMap.get(p.origem)?.id ?? null,
+      rendimento_percent: num(p.rendimento) || 100,
+      estoque_minimo: num(p.estoqueMinimo),
+      validade_dias: num(p.validadeDias),
+      ativo: true,
+    })),
+    "nome",
+  );
+  const fracionadoMap = byName(fracionados);
+
+  await insertRows(supabase, "saidas_central", (db.saidasCentral ?? []).map((s) => ({
+    data: s.data,
+    documento: clean(s.documento),
+    produto_bruto_id: brutoMap.get(s.produto)?.id,
+    destino_local_id: localMap.get(s.destino)?.id,
+    quantidade: num(s.quantidade),
+    criado_por: user.id,
+  })));
+  await insertRows(supabase, "producoes", (db.producoes ?? []).map((p) => ({
+    data: p.data,
+    produto_bruto_id: brutoMap.get(p.produtoBruto)?.id,
+    quantidade_utilizada: num(p.quantidadeUtilizada),
+    produto_fracionado_id: fracionadoMap.get(p.produtoFracionado)?.id,
+    quantidade_produzida: num(p.quantidadeProduzida),
+    criado_por: user.id,
+  })));
+  await insertRows(supabase, "saidas_fracionado", (db.saidasFracionado ?? []).map((s) => ({
+    data: s.data,
+    documento: clean(s.documento),
+    produto_fracionado_id: fracionadoMap.get(s.produto)?.id,
+    destino_local_id: localMap.get(s.destino)?.id,
+    quantidade: num(s.quantidade),
+    criado_por: user.id,
+  })));
+}
+
 export async function saveLegacyDB(supabase: SupabaseClient, user: User, db: LegacyDB, scope: SyncScope = "full") {
   if (scope === "fracionados") {
     await saveFracionadosMovements(supabase, user, db);
+    return;
+  }
+  if (scope === "controle_fracionados_ampliado") {
+    await saveFracionadosExpanded(supabase, user, db);
     return;
   }
   const categoriasNomes = new Set<string>();

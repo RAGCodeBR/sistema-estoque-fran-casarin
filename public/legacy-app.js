@@ -17,8 +17,10 @@ function destinosCentralOptions(){ return nomesOrdenados(db.locais.filter(l=>l.t
 function destinosFracionadoOptions(){ return nomesOrdenados(db.locais.filter(l=>l.tipo==='Consumidor')); }
 const STORAGE_KEY = "estoqueFranCasarinDB_v1";
 
-const FRACIONADOS_TABS = new Set(['estoqueCentral','estoqueFracionados','producoes','saidasFracionado']);
-const FRACIONADOS_EDIT_TABS = new Set(['producoes','saidasFracionado']);
+// O Controle de Fracionados também cadastra os produtos que produz e registra
+// a retirada de insumos da Central para a cozinha.
+const FRACIONADOS_TABS = new Set(['estoqueCentral','estoqueFracionados','fracionados','saidasCentral','producoes','saidasFracionado']);
+const FRACIONADOS_EDIT_TABS = new Set(['fracionados','saidasCentral','producoes','saidasFracionado']);
 const PERFIS_SIMULAVEIS = new Set(['master','administrador','controle_fracionados','visualizador']);
 function previewSimulationAllowed(){
   const host = window.location.hostname;

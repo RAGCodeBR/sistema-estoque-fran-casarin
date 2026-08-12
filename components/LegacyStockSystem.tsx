@@ -140,7 +140,7 @@ export default function LegacyStockSystem() {
           supabase,
           user,
           () => refreshFromCloud(true),
-          perfil.papel === "controle_fracionados" ? "fracionados" : "full",
+          perfil.papel === "controle_fracionados" ? "controle_fracionados_ampliado" : "full",
           cloudRevision,
         );
 
