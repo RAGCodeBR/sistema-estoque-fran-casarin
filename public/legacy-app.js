@@ -4,6 +4,13 @@ const CATEGORIAS_PADRAO = ["Peixes e Frutos do Mar","Grãos e Cereais","Hortifru
 // então uma categoria nova cadastrada aparece automaticamente nos formulários de Produtos Brutos, Fracionados e Importar NF.
 function compareText(a,b){ return String(a||'').localeCompare(String(b||''), 'pt-BR', {sensitivity:'base'}); }
 function searchText(value){ return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('pt-BR'); }
+function rowMatchesSearch(row, query){
+  if(!query) return true;
+  // Busca nos dados exibidos ao usuário, sem depender de campos internos.
+  const searchable = [row.nome,row.categoria,row.tipoProduto,row.unidade,row.fornecedor,row.origem]
+    .map(searchText).join(' ');
+  return query.split(/\s+/).filter(Boolean).every(term=>searchable.includes(term));
+}
 function nomesOrdenados(items){ return (items||[]).map(x=>typeof x==='string'?x:x.nome).filter(Boolean).sort(compareText); }
 function categoriaOptions(){ return nomesOrdenados(db.categorias); }
 const UNIDADES = ["KG","G","L","ML","UN","CX","PCT"];
@@ -453,6 +460,7 @@ const defBrutos = {
   ],
   columns:[
     {label:'Produto', render:r=>`<strong>${r.nome}</strong>`},
+    {label:'Tipo de Produto', render:(r,idx)=> canEditTab('brutos') ? `<select class="tipoProduto" data-idx="${idx}" aria-label="Tipo de produto de ${escapeHtml(r.nome)}"><option value="Bruto" ${(r.tipoProduto||'Bruto')==='Bruto'?'selected':''}>Bruto</option><option value="Fracionado" ${r.tipoProduto==='Fracionado'?'selected':''}>Fracionado</option></select>` : (r.tipoProduto||'Bruto')},
     {label:'Categoria', render:r=>r.categoria},
     {label:'Unidade', render:r=>r.unidade},
     {label:'Estoque Mínimo', render:r=>fmtNum(r.estoqueMinimo)},
@@ -485,6 +493,7 @@ const defFracionados = {
   ],
   columns:[
     {label:'Produto Fracionado', render:r=>`<strong>${r.nome}</strong>`},
+    {label:'Tipo de Produto', render:(r,idx)=> canEditTab('fracionados') ? `<select class="tipoProdutoFracionado" data-idx="${idx}" aria-label="Tipo de produto de ${escapeHtml(r.nome)}"><option value="Bruto" ${r.tipoProduto==='Bruto'?'selected':''}>Bruto</option><option value="Fracionado" ${(r.tipoProduto||'Fracionado')==='Fracionado'?'selected':''}>Fracionado</option></select>` : (r.tipoProduto||'Fracionado')},
     {label:'Origem (Bruto)', render:r=>r.origem},
     {label:'Categoria', render:r=>r.categoria},
     {label:'Unidade', render:r=>r.unidade},
@@ -809,6 +818,7 @@ const defAjustesEstoque = {
 /* ============================= RENDER GENÉRICO CRUD ============================= */
 let crudEdit = null; // {key, idx} — controla o modo de edição de um registro já lançado
 let crudSearch = {};
+let crudCategoryFilter = {};
 
 function renderCrud(def){
   const c = document.getElementById('content');
@@ -827,7 +837,7 @@ function renderCrud(def){
     </div>
     <div class="card">
       <h2>Registros (${db[def.key].length})</h2>
-      ${def.searchableTable ? `<div class="tabletools"><input id="search-${def.key}" type="search" placeholder="${def.searchPlaceholder||'Buscar por nome, categoria ou fornecedor…'}" autocomplete="off">${def.sortRows ? '<span class="hint">Produtos em ordem alfabética.</span>' : ''}</div>` : ''}
+      ${def.searchableTable ? `<div class="tabletools"><input id="search-${def.key}" type="search" placeholder="${def.searchPlaceholder||'Buscar produto'}" aria-label="Buscar nos registros" autocomplete="off">${def.key==='brutos'||def.key==='fracionados'?`<select id="category-filter-${def.key}" aria-label="Filtrar por categoria"><option value="">Todas as categorias</option>${categoriaOptions().map(cat=>`<option value="${escapeHtml(cat)}">${escapeHtml(cat)}</option>`).join('')}</select>`:''}</div>` : ''}
       <div id="table-${def.key}"></div>
     </div>
   `;
@@ -907,7 +917,18 @@ function renderCrud(def){
   });
 
   renderTable(def, wrap.querySelector(`#table-${def.key}`));
-  if(def.searchableTable){ const search=wrap.querySelector(`#search-${def.key}`); search.value=crudSearch[def.key]||''; search.addEventListener('input',()=>{crudSearch[def.key]=search.value;renderTable(def,wrap.querySelector(`#table-${def.key}`));}); }
+  if(def.searchableTable){
+    const search=wrap.querySelector(`#search-${def.key}`);
+    const applySearch=()=>{crudSearch[def.key]=search.value;renderTable(def,wrap.querySelector(`#table-${def.key}`));};
+    search.value=crudSearch[def.key]||'';
+    search.addEventListener('input',applySearch);
+    search.addEventListener('search',applySearch);
+    const categoryFilter=wrap.querySelector(`#category-filter-${def.key}`);
+    if(categoryFilter){
+      categoryFilter.value=crudCategoryFilter[def.key]||'';
+      categoryFilter.addEventListener('change',()=>{crudCategoryFilter[def.key]=categoryFilter.value;renderTable(def,wrap.querySelector(`#table-${def.key}`));});
+    }
+  }
 }
 
 function renderTable(def, container){
@@ -916,7 +937,9 @@ function renderTable(def, container){
   if(def.groupByDate){ renderTableGrouped(def, container, rows); return; }
   const query=searchText(crudSearch[def.key]);
   let indexedRows=rows.map((r,idx)=>({r,idx}));
-  if(query) indexedRows=indexedRows.filter(({r})=>searchText(JSON.stringify(r)).includes(query));
+  if(query) indexedRows=indexedRows.filter(({r})=>rowMatchesSearch(r,query));
+  const category=crudCategoryFilter[def.key]||'';
+  if(category) indexedRows=indexedRows.filter(({r})=>r.categoria===category);
   if(def.sortRows) indexedRows.sort((a,b)=>compareText(def.sortRows(a.r),def.sortRows(b.r)));
   if(indexedRows.length===0){ container.innerHTML=`<div class="empty">Nenhum registro encontrado para esta busca.</div>`; return; }
   let html = `<table><thead><tr>`;
@@ -925,7 +948,7 @@ function renderTable(def, container){
   html += `</tr></thead><tbody>`;
   indexedRows.forEach(({r, idx})=>{
     html += `<tr>`;
-    def.columns.forEach(c=> html += `<td>${c.render(r)}</td>`);
+    def.columns.forEach(c=> html += `<td>${c.render(r,idx)}</td>`);
     if(canEditTab(def.key)) html += `<td style="white-space:nowrap"><button class="editbtn" data-idx="${idx}" title="Editar">✎</button> <button class="delbtn" data-idx="${idx}" title="Excluir">✕</button></td>`;
     html += `</tr>`;
   });
@@ -935,6 +958,48 @@ function renderTable(def, container){
 }
 
 function wireCrudButtons(def, container, rows){
+  if(def.key==='brutos'){
+    container.querySelectorAll('.tipoProduto').forEach(select=>{
+      select.addEventListener('change',async ()=>{
+        const idx = parseInt(select.dataset.idx);
+        if(!rows[idx]) return;
+        const anterior = rows[idx].tipoProduto || 'Bruto';
+        const tipo = select.value;
+        select.disabled = true;
+        rows[idx].tipoProduto = tipo;
+        try{
+          if(!window.__estoqueCloudSync || typeof window.__estoqueCloudSync.convertProductType !== 'function') throw new Error('Sincronização ainda não está pronta. Atualize a página e tente novamente.');
+          await window.__estoqueCloudSync.convertProductType('bruto', rows[idx].nome, tipo);
+        }catch(error){
+          rows[idx].tipoProduto = anterior;
+          select.value = anterior;
+          alert(error && error.message ? `Não foi possível salvar o tipo do produto: ${error.message}` : 'Não foi possível salvar o tipo do produto.');
+        }finally{
+          select.disabled = false;
+        }
+      });
+    });
+  }
+  if(def.key==='fracionados'){
+    container.querySelectorAll('.tipoProdutoFracionado').forEach(select=>{
+      select.addEventListener('change',async ()=>{
+        const idx=parseInt(select.dataset.idx);
+        if(!rows[idx]) return;
+        const anterior=rows[idx].tipoProduto||'Fracionado';
+        const tipo=select.value;
+        select.disabled=true;
+        rows[idx].tipoProduto=tipo;
+        try{
+          if(!window.__estoqueCloudSync || typeof window.__estoqueCloudSync.convertProductType !== 'function') throw new Error('Sincronização ainda não está pronta. Atualize a página e tente novamente.');
+          await window.__estoqueCloudSync.convertProductType('fracionado',rows[idx].nome,tipo);
+        }catch(error){
+          rows[idx].tipoProduto=anterior;
+          select.value=anterior;
+          alert(error && error.message ? `Não foi possível salvar o tipo do produto: ${error.message}` : 'Não foi possível salvar o tipo do produto.');
+        }finally{select.disabled=false;}
+      });
+    });
+  }
   container.querySelectorAll('.editbtn').forEach(b=>{
     b.addEventListener('click', ()=>{
       crudEdit = { key: def.key, idx: parseInt(b.dataset.idx) };
@@ -1031,10 +1096,10 @@ function renderEstoqueCentral(){
   const c = document.getElementById('content');
   let html = `<h1 class="pagetitle">Estoque Central</h1><p class="pagesub">Saldo dos produtos brutos na Central de Distribuição, calculado automaticamente.</p>`;
   html += `<div class="card"><h2>Produtos Brutos — Saldo na ${getCentralNome()}</h2>${screenSearchTool('estoqueCentral', 'Buscar produto, categoria ou unidade…')}<table><thead><tr>
-    <th>Produto</th><th>Categoria</th><th>Unidade</th><th>Saldo Atual</th><th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>`;
+    <th>Produto</th><th>Tipo de Produto</th><th>Categoria</th><th>Unidade</th><th>Saldo Atual</th><th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>`;
   [...db.brutos].sort((a,b)=>compareText(a.nome,b.nome)).forEach(b=>{
     const s = saldoCentral(b.nome);
-    html += `<tr class="screen-search-row"><td><strong>${b.nome}</strong></td><td>${b.categoria||"—"}</td><td>${b.unidade}</td><td>${fmtNum(s)}</td><td>${fmtNum(b.estoqueMinimo)}</td><td>${statusBadge(s,b.estoqueMinimo)}</td></tr>`;
+    html += `<tr class="screen-search-row"><td><strong>${b.nome}</strong></td><td>${b.tipoProduto||'Bruto'}</td><td>${b.categoria||"—"}</td><td>${b.unidade}</td><td>${fmtNum(s)}</td><td>${fmtNum(b.estoqueMinimo)}</td><td>${statusBadge(s,b.estoqueMinimo)}</td></tr>`;
   });
   html += `</tbody></table></div>`;
   c.innerHTML = html;
@@ -1617,8 +1682,13 @@ async function renderUsuarios(){
 
 /* ============================= ALERTAS ============================= */
 let screenSearch = {};
+let screenCategoryFilter = {};
 function screenSearchTool(key, placeholder){
-  return `<div class="tabletools"><input id="screen-search-${key}" type="search" placeholder="${placeholder}" autocomplete="off"><span class="hint">A busca ignora acentos.</span></div>`;
+  const hasCategoryFilter = key === 'estoqueCentral' || key === 'estoqueFracionados';
+  const categoryFilter = hasCategoryFilter
+    ? `<select id="screen-category-${key}" aria-label="Filtrar por categoria"><option value="">Todas as categorias</option>${categoriaOptions().map(cat=>`<option value="${escapeHtml(cat)}">${escapeHtml(cat)}</option>`).join('')}</select>`
+    : '';
+  return `<div class="tabletools"><input id="screen-search-${key}" type="search" placeholder="${placeholder}" autocomplete="off">${categoryFilter}<span class="hint">A busca ignora acentos.</span></div>`;
 }
 function wireScreenSearch(container, key){
   const input = container.querySelector(`#screen-search-${key}`);
@@ -2934,7 +3004,7 @@ initLock();
     let limit=60;
     function draw(){
       const q=searchText(query);
-      const filtered=all.filter(item=>!q || searchText([item.nome,item.unidade,item.categoria].join(' ')).includes(q));
+      const filtered=all.filter(item=>!q || searchText(item.nome).includes(q));
       const shown=filtered.slice(0,limit);
       c.innerHTML='<h1 class="pagetitle">'+title+'</h1><p class="pagesub">'+subtitle+'</p><div class="card"><h2>'+heading+'</h2>'+screenSearchTool(key,'Buscar produto, categoria ou unidade…')+'<p class="footnote" id="mobile-stock-count"></p><table><thead><tr><th>Produto</th><th>Categoria</th><th>Unidade</th><th>Saldo Atual</th><th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>'+shown.map(item=>{const atual=saldo(item);return '<tr class="screen-search-row"><td><strong>'+escapeHtml(item.nome)+'</strong></td><td>'+escapeHtml(item.categoria||'—')+'</td><td>'+escapeHtml(item.unidade||'—')+'</td><td>'+fmtNum(atual)+'</td><td>'+fmtNum(item.estoqueMinimo)+'</td><td>'+statusBadge(atual,item.estoqueMinimo)+'</td></tr>';}).join('')+'</tbody></table>'+(shown.length<filtered.length?'<button type="button" class="btn secondary" id="mobile-more-'+key+'">Mostrar mais ('+(filtered.length-shown.length)+')</button>':'')+'</div>';
       c.querySelector('#mobile-stock-count').textContent='Mostrando '+shown.length+' de '+filtered.length+' produto(s).';
@@ -2952,18 +3022,29 @@ initLock();
 
 /* Paginação também no desktop: evita travar ao alternar para estoques grandes. */
 (function(){
-  function renderPagedStock(key,title,subtitle,heading,items,saldo){
+  function renderPagedStock(key,title,subtitle,heading,items,saldo,showProductType=false,defaultProductType='Bruto'){
     const c=document.getElementById('content');
     const all=[...items()].sort((a,b)=>compareText(a.nome,b.nome));
     let query=screenSearch[key]||'';
+    let category=screenCategoryFilter[key]||'';
     let limit=window.innerWidth<=600?60:100;
     function draw(){
       const q=searchText(query);
-      const filtered=all.filter(item=>!q||searchText([item.nome,item.unidade,item.categoria].join(' ')).includes(q));
+      const filtered=all.filter(item=>(!q||searchText(item.nome).includes(q))&&(!category||item.categoria===category));
       const shown=filtered.slice(0,limit);
-      c.innerHTML='<h1 class="pagetitle">'+title+'</h1><p class="pagesub">'+subtitle+'</p><div class="card"><h2>'+heading+'</h2>'+screenSearchTool(key,'Buscar produto, categoria ou unidade…')+'<p class="footnote" id="paged-stock-count"></p><table><thead><tr><th>Produto</th><th>Categoria</th><th>Unidade</th><th>Saldo Atual</th><th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>'+shown.map(item=>{const atual=saldo(item);return '<tr class="screen-search-row"><td><strong>'+escapeHtml(item.nome)+'</strong></td><td>'+escapeHtml(item.categoria||'—')+'</td><td>'+escapeHtml(item.unidade||'—')+'</td><td>'+fmtNum(atual)+'</td><td>'+fmtNum(item.estoqueMinimo)+'</td><td>'+statusBadge(atual,item.estoqueMinimo)+'</td></tr>';}).join('')+'</tbody></table>'+(shown.length<filtered.length?'<button type="button" class="btn secondary" id="paged-more-'+key+'">Mostrar mais ('+(filtered.length-shown.length)+')</button>':'')+'</div>';
+      c.innerHTML='<h1 class="pagetitle">'+title+'</h1><p class="pagesub">'+subtitle+'</p><div class="card"><h2>'+heading+'</h2>'+screenSearchTool(key,'Buscar produto')+'<p class="footnote" id="paged-stock-count"></p><table><thead><tr><th>Produto</th>'+(showProductType?'<th>Tipo de Produto</th>':'')+'<th>Categoria</th><th>Unidade</th><th>Saldo Atual</th><th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>'+shown.map(item=>{const atual=saldo(item);return '<tr class="screen-search-row"><td><strong>'+escapeHtml(item.nome)+'</strong></td>'+(showProductType?'<td>'+escapeHtml(item.tipoProduto||defaultProductType)+'</td>':'')+'<td>'+escapeHtml(item.categoria||'—')+'</td><td>'+escapeHtml(item.unidade||'—')+'</td><td>'+fmtNum(atual)+'</td><td>'+fmtNum(item.estoqueMinimo)+'</td><td>'+statusBadge(atual,item.estoqueMinimo)+'</td></tr>';}).join('')+'</tbody></table>'+(shown.length<filtered.length?'<button type="button" class="btn secondary" id="paged-more-'+key+'">Mostrar mais ('+(filtered.length-shown.length)+')</button>':'')+'</div>';
       c.querySelector('#paged-stock-count').textContent='Mostrando '+shown.length+' de '+filtered.length+' produto(s).';
       const input=c.querySelector('#screen-search-'+key);input.value=query;
+      const categoryInput=c.querySelector('#screen-category-'+key);
+      if(categoryInput){
+        categoryInput.value=category;
+        categoryInput.addEventListener('change',()=>{
+          category=categoryInput.value;
+          screenCategoryFilter[key]=category;
+          limit=window.innerWidth<=600?60:100;
+          draw();
+        });
+      }
       input.addEventListener('input',()=>{
         query=input.value;
         screenSearch[key]=query;
@@ -2981,6 +3062,6 @@ initLock();
     }
     draw();
   }
-  renderEstoqueCentral=function(){renderPagedStock('estoqueCentral','Estoque Central','Saldo dos produtos brutos na Central de Distribuição, calculado automaticamente.','Produtos Brutos — Saldo na Central de Distribuição',()=>db.brutos,item=>saldoCentral(item.nome));};
-  renderEstoqueFracionados=function(){renderPagedStock('estoqueFracionados','Estoque Fracionados','Saldo dos produtos preparados e fracionados, calculado automaticamente.','Produtos Fracionados — Saldo produzido',()=>db.fracionados,item=>saldoCozinhaFracionado(item.nome));};
+  renderEstoqueCentral=function(){renderPagedStock('estoqueCentral','Estoque Central','Saldo dos produtos brutos na Central de Distribuição, calculado automaticamente.','Produtos Brutos — Saldo na Central de Distribuição',()=>db.brutos,item=>saldoCentral(item.nome),true);};
+  renderEstoqueFracionados=function(){renderPagedStock('estoqueFracionados','Estoque Fracionados','Saldo dos produtos preparados e fracionados, calculado automaticamente.','Produtos Fracionados — Saldo produzido',()=>db.fracionados,item=>saldoCozinhaFracionado(item.nome),true,'Fracionado');};
 })();

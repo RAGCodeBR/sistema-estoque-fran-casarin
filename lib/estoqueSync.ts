@@ -279,6 +279,7 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
     brutos: brutos.map((p) => ({
       nome: p.nome,
       categoria: categoriaPorId.get(p.categoria_id)?.nome ?? "Outros",
+      tipoProduto: p.tipo_produto ?? "Bruto",
       unidade: p.unidade,
       estoqueMinimo: num(p.estoque_minimo),
       fornecedor: p.fornecedor ?? "",
@@ -288,6 +289,7 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
     fracionados: fracionados.map((p) => ({
       nome: p.nome,
       categoria: categoriaPorId.get(p.categoria_id)?.nome ?? "Outros",
+      tipoProduto: p.tipo_produto ?? "Fracionado",
       unidade: p.unidade,
       origem: brutoPorId.get(p.origem_bruto_id)?.nome ?? "",
       rendimento: num(p.rendimento_percent),
@@ -383,11 +385,11 @@ function atomicPayload(db: LegacyDB) {
     categorias: (db.categorias ?? []).map((x) => ({ nome: x.nome })),
     locais: (db.locais ?? []).map((x) => ({ nome: x.nome, tipo: x.tipo, responsavel: x.responsavel })),
     brutos: (db.brutos ?? []).map((x) => ({
-      nome: x.nome, categoria: x.categoria, unidade: x.unidade, estoque_minimo: num(x.estoqueMinimo), fornecedor: x.fornecedor,
+      nome: x.nome, categoria: x.categoria, tipo_produto: x.tipoProduto ?? "Bruto", unidade: x.unidade, estoque_minimo: num(x.estoqueMinimo), fornecedor: x.fornecedor,
       preco_medio: num(x.precoMedio), validade_dias: num(x.validadeDias),
     })),
     fracionados: (db.fracionados ?? []).map((x) => ({
-      nome: x.nome, categoria: x.categoria, unidade: x.unidade, origem: x.origem, rendimento: num(x.rendimento),
+      nome: x.nome, categoria: x.categoria, tipo_produto: x.tipoProduto ?? "Fracionado", unidade: x.unidade, origem: x.origem, rendimento: num(x.rendimento),
       estoque_minimo: num(x.estoqueMinimo), validade_dias: num(x.validadeDias),
     })),
     entradasCentral: (db.entradasCentral ?? []).map((x) => ({
@@ -615,6 +617,7 @@ async function saveFracionadosExpanded(supabase: SupabaseClient, user: User, db:
     (db.fracionados ?? []).map((p) => ({
       nome: p.nome,
       categoria_id: categoriaMap.get(p.categoria)?.id ?? null,
+      tipo_produto: p.tipoProduto ?? "Fracionado",
       unidade: p.unidade || "UN",
       origem_bruto_id: brutoMap.get(p.origem)?.id ?? null,
       rendimento_percent: num(p.rendimento) || 100,
@@ -945,6 +948,45 @@ export function installCloudSync(
   })();
 
   (window as any).__estoqueCloudSync = {
+    async convertProductType(origem: "bruto" | "fracionado", nome: string, tipo: "Bruto" | "Fracionado") {
+      const { error } = await supabase.rpc("converter_tipo_produto", {
+        p_origem: origem,
+        p_nome: nome,
+        p_tipo_destino: tipo,
+      });
+      if (error) throw error;
+      const { db: freshDB, revision } = await loadConsistentLegacyState(supabase);
+      window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(freshDB));
+      lastSavedDB = cloneDB(freshDB);
+      stockRevision = revision;
+      window.__estoqueLegacy?.replaceDB(freshDB);
+      window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
+    },
+    async updateProductType(nome: string, tipo: "Bruto" | "Fracionado") {
+      const { error } = await supabase.rpc("atualizar_tipo_produto_bruto", {
+        p_nome: nome,
+        p_tipo: tipo,
+      });
+      if (error) throw error;
+      const current = window.__estoqueLegacy?.getDB() as LegacyDB | undefined;
+      if (current) {
+        const product = current.brutos?.find((item) => item.nome === nome);
+        if (product) product.tipoProduto = tipo;
+        lastSavedDB = cloneDB(current);
+      }
+      window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
+    },
+    async updateFractionedProductType(nome: string, tipo: "Bruto" | "Fracionado") {
+      const { error } = await supabase.rpc("atualizar_tipo_produto_fracionado", { p_nome: nome, p_tipo: tipo });
+      if (error) throw error;
+      const current = window.__estoqueLegacy?.getDB() as LegacyDB | undefined;
+      if (current) {
+        const product = current.fracionados?.find((item) => item.nome === nome);
+        if (product) product.tipoProduto = tipo;
+        lastSavedDB = cloneDB(current);
+      }
+      window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
+    },
     save(db: LegacyDB, options?: { immediate?: boolean }) {
       window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(db));
       clearTimeout(timer);

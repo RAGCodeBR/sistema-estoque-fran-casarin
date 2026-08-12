@@ -24,6 +24,9 @@ declare global {
       save: (db: unknown, options?: { immediate?: boolean }) => void;
       isSaving: () => boolean;
       setRemoteState: (db: unknown, revision: number) => void;
+      updateProductType: (nome: string, tipo: "Bruto" | "Fracionado") => Promise<void>;
+      updateFractionedProductType: (nome: string, tipo: "Bruto" | "Fracionado") => Promise<void>;
+      convertProductType: (origem: "bruto" | "fracionado", nome: string, tipo: "Bruto" | "Fracionado") => Promise<void>;
     };
     __estoqueLegacy?: {
       getDB: () => unknown;
@@ -48,6 +51,20 @@ declare global {
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const assetVersion = process.env.NEXT_PUBLIC_APP_VERSION ?? "local";
 const defaultEmail = "";
+
+function authErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message && error.message !== "{}") return error.message;
+  if (error && typeof error === "object") {
+    const detail = error as { message?: unknown; error_description?: unknown; msg?: unknown; code?: unknown; name?: unknown; status?: unknown };
+    const message = detail.message ?? detail.error_description ?? detail.msg;
+    if (typeof message === "string" && message && message !== "{}") return message;
+    if (typeof detail.code === "string" && detail.code) return `Falha na autenticação (código ${detail.code}).`;
+    if (detail.name === "AuthRetryableFetchError" || detail.status === 0) {
+      return "O navegador bloqueou ou interrompeu a comunicação com o login. Desative bloqueadores de anúncio/privacidade para esta página ou tente em uma janela anônima.";
+    }
+  }
+  return "O navegador não recebeu uma resposta válida do login. Desative bloqueadores de anúncio/privacidade para esta página ou tente em uma janela anônima.";
+}
 
 const LegacyHost = memo(function LegacyHost({ markup }: { markup: string }) {
   return <div dangerouslySetInnerHTML={{ __html: markup }} />;
@@ -222,22 +239,28 @@ export default function LegacyStockSystem() {
     setAuthMessage("Verificando acesso...");
 
     const credentials = { email: email.trim(), password };
-    const result =
-      authMode === "login"
-        ? await supabase.auth.signInWithPassword(credentials)
-        : await supabase.auth.signUp({ ...credentials, options: { data: { name: email.trim() } } });
+    try {
+      const result =
+        authMode === "login"
+          ? await supabase.auth.signInWithPassword(credentials)
+          : await supabase.auth.signUp({ ...credentials, options: { data: { name: email.trim() } } });
 
-    if (result.error) {
-      setAuthMessage(result.error.message);
-      return;
+      if (result.error) {
+        console.error("Falha na autenticação do Supabase:", result.error);
+        setAuthMessage(authErrorMessage(result.error));
+        return;
+      }
+
+      if (authMode === "signup" && !result.data.session) {
+        setAuthMessage("Cadastro criado. Confira o e-mail para confirmar o acesso e depois entre novamente.");
+        return;
+      }
+
+      setAuthMessage("Acesso liberado. Abrindo sistema...");
+    } catch (error) {
+      console.error("Erro inesperado ao autenticar no Supabase:", error);
+      setAuthMessage(authErrorMessage(error));
     }
-
-    if (authMode === "signup" && !result.data.session) {
-      setAuthMessage("Cadastro criado. Confira o e-mail para confirmar o acesso e depois entre novamente.");
-      return;
-    }
-
-    setAuthMessage("Acesso liberado. Abrindo sistema...");
   }
 
   async function handleLogout() {
