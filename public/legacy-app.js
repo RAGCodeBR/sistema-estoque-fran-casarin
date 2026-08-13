@@ -3110,7 +3110,9 @@ initLock();
     const c=document.getElementById('content');
     const all=[...items()].sort((a,b)=>compareText(a.nome,b.nome));
     let query=screenSearch[key]||'';
-    let category=screenCategoryFilter[key]||'';
+    // O filtro de categoria deve iniciar em "Todas" a cada entrada nesta aba.
+    delete screenCategoryFilter[key];
+    let category='';
     let saldoOrder='asc';
     let limit=window.innerWidth<=600?60:100;
     function draw(){
@@ -3132,7 +3134,6 @@ initLock();
         categoryInput.value=category;
         categoryInput.addEventListener('change',()=>{
           category=categoryInput.value;
-          screenCategoryFilter[key]=category;
           limit=window.innerWidth<=600?60:100;
           draw();
         });
