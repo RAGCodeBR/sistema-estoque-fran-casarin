@@ -148,11 +148,11 @@ begin
     raise exception 'O acesso Master nao pode ser excluido por aqui.';
   end if;
 
-  update public.perfis
-  set ativo = false,
-      atualizado_em = now()
-  where user_id = p_user_id
-  returning * into v_perfil;
+  -- O status ativo/bloqueado e controlado pela funcao de atualizacao.
+  -- Aqui removemos somente o perfil de acesso: os logs e movimentacoes
+  -- existentes permanecem preservados.
+  delete from public.perfis
+  where user_id = p_user_id;
 
   perform public.log_acesso_sistema(
     'Excluiu acesso de ' || v_perfil.email,

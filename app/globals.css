@@ -181,6 +181,12 @@
   .delbtn:hover{color:var(--red);}
   .editbtn{background:none;border:none;color:#aaa;cursor:pointer;font-size:15px;font-weight:700;width:30px;height:30px;border-radius:8px;}
   .editbtn:hover{color:var(--gold-dark);}
+.edit-ajuste,.del-ajuste{background:none;border:none;padding:0;color:#aaa;cursor:pointer;font-size:15px;font-weight:700;line-height:1;}
+.card.ajuste-entry-card{min-height:240px;overflow-x:visible;overflow-y:visible;}
+.card.form-search-overlay-card{min-height:240px;overflow-x:visible;overflow-y:visible;}
+.edit-ajuste{margin-right:12px;}
+  .edit-ajuste:hover{color:var(--gold-dark);}
+  .del-ajuste:hover{color:var(--red);}
   .tipoProduto,.tipoProdutoFracionado{
     appearance:none;-webkit-appearance:none;min-width:122px;height:34px;padding:0 32px 0 12px;
     border:1px solid rgba(185,135,40,.5);border-radius:999px;background-color:#fffaf0;

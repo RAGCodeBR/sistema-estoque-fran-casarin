@@ -167,7 +167,7 @@ function mergeConcurrentChanges(base: LegacyDB, local: LegacyDB, remote: LegacyD
   const sections: ArraySection[] = scope === "fracionados"
     ? ["producoes", "saidasFracionado"]
     : scope === "controle_fracionados_ampliado"
-      ? ["fracionados", "saidasCentral", "producoes", "saidasFracionado"]
+      ? ["fracionados", "saidasCentral", "producoes", "saidasFracionado", "ajustesFracionados"]
     : Object.keys(mergeKeyFields) as ArraySection[];
 
   sections.forEach((section) => {
@@ -609,6 +609,7 @@ async function saveFracionadosExpanded(supabase: SupabaseClient, user: User, db:
     deleteAll(supabase, "saidas_fracionado"),
     deleteAll(supabase, "producoes"),
     deleteAll(supabase, "saidas_central"),
+    deleteAll(supabase, "ajustes_fracionados"),
   ]);
   await deleteMissingByName(supabase, "produtos_fracionados", (db.fracionados ?? []).map((p) => p.nome).filter(Boolean));
   const fracionados = await upsertReturning<any>(
@@ -653,6 +654,16 @@ async function saveFracionadosExpanded(supabase: SupabaseClient, user: User, db:
     quantidade: num(s.quantidade),
     criado_por: user.id,
   })));
+  await insertRows(supabase, "ajustes_fracionados", (db.ajustesFracionados ?? []).map((a) => ({
+    data: a.data,
+    produto_fracionado_id: fracionadoMap.get(a.produto)?.id,
+    saldo_anterior: num(a.saldoAnterior),
+    novo_saldo: num(a.novoSaldo),
+    diferenca: num(a.diferenca),
+    motivo: clean(a.motivo) ?? "Ajuste",
+    responsavel: clean(a.responsavel) ?? "Sistema",
+    criado_por: user.id,
+  })));
 }
 
 export async function saveLegacyDB(supabase: SupabaseClient, user: User, db: LegacyDB, scope: SyncScope = "full") {
@@ -673,6 +684,7 @@ export async function saveLegacyDB(supabase: SupabaseClient, user: User, db: Leg
   await Promise.all([
     deleteAll(supabase, "itens_manuais_compra"),
     deleteAll(supabase, "pedidos_compra"),
+    deleteAll(supabase, "ajustes_fracionados"),
     deleteAll(supabase, "ajustes_estoque"),
     deleteAll(supabase, "saidas_fracionado"),
     deleteAll(supabase, "producoes"),
@@ -776,6 +788,16 @@ export async function saveLegacyDB(supabase: SupabaseClient, user: User, db: Leg
   await insertRows(supabase, "ajustes_estoque", (db.ajustesEstoque ?? []).map((a) => ({
     data: a.data,
     produto_bruto_id: brutoMap.get(a.produto)?.id,
+    saldo_anterior: num(a.saldoAnterior),
+    novo_saldo: num(a.novoSaldo),
+    diferenca: num(a.diferenca),
+    motivo: clean(a.motivo) ?? "Ajuste",
+    responsavel: clean(a.responsavel) ?? user.email ?? "Sistema",
+    criado_por: user.id,
+  })));
+  await insertRows(supabase, "ajustes_fracionados", (db.ajustesFracionados ?? []).map((a) => ({
+    data: a.data,
+    produto_fracionado_id: fracionadoMap.get(a.produto)?.id,
     saldo_anterior: num(a.saldoAnterior),
     novo_saldo: num(a.novoSaldo),
     diferenca: num(a.diferenca),

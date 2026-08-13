@@ -175,6 +175,7 @@ function renameFracionadoReferences(oldName,newName){
   if(!oldName || oldName===newName) return;
   (db.producoes||[]).forEach(x=>x.produtoFracionado=replaceExactName(x.produtoFracionado,oldName,newName));
   (db.saidasFracionado||[]).forEach(x=>x.produto=replaceExactName(x.produto,oldName,newName));
+  (db.ajustesFracionados||[]).forEach(x=>x.produto=replaceExactName(x.produto,oldName,newName));
 }
 function renameCategoriaReferences(oldName,newName){
   if(!oldName || oldName===newName) return;
@@ -326,9 +327,14 @@ function validadeBadge(dias){
 }
 
 /* ============================= NAV ============================= */
+const CURRENT_TAB_KEY = "estoqueFranCasarinCurrentTab";
 let currentTab = "dashboard";
+try{
+  const savedTab = localStorage.getItem(CURRENT_TAB_KEY);
+  if(savedTab && document.querySelector(`.navitem[data-tab="${savedTab}"]`)) currentTab = savedTab;
+}catch(e){}
 document.querySelectorAll('.navitem[data-tab]').forEach(btn=>{
-  btn.addEventListener('click', ()=>{ currentTab = btn.dataset.tab; render(); closeMobileSidebar(); });
+  btn.addEventListener('click', ()=>{ currentTab = btn.dataset.tab; try{localStorage.setItem(CURRENT_TAB_KEY,currentTab);}catch(e){} render(); closeMobileSidebar(); });
 });
 const logoutBtn = document.getElementById('logoutBtn');
 if(logoutBtn){
@@ -411,6 +417,7 @@ function setActiveNav(){
 /* ============================= RENDER ROOT ============================= */
 function render(){
   if(!canViewTab(currentTab)) currentTab = isFracionadosAccess() ? 'estoqueCentral' : 'dashboard';
+  try{localStorage.setItem(CURRENT_TAB_KEY,currentTab);}catch(e){}
   document.getElementById('todayLabel').textContent = "Hoje: " + fmtDate(todayStr());
   setActiveNav();
   updateSidebarBadges();
@@ -424,7 +431,7 @@ function render(){
     categorias: ()=>renderCrud(defCategorias),
     entradasCentral: ()=>renderCrud(defEntradasCentral), saidasCentral: ()=>renderCrud(defSaidasCentral),
     producoes: ()=>renderCrud(defProducoes), saidasFracionado: ()=>renderCrud(defSaidasFracionado),
-    ajustesEstoque: ()=>renderCrud(defAjustesEstoque),
+    ajustesEstoque: renderAjustesEstoque,
   };
   c.innerHTML = "";
   (renderers[currentTab]||renderDashboard)();
@@ -558,7 +565,7 @@ const defEntradasCentral = {
   fields:[
     {name:'data', label:'Data', type:'date', default:todayStr},
     {name:'nf', label:'Nº NF / Documento', type:'text'},
-    {name:'produto', label:'Produto', type:'select', options:()=>nomesOrdenados(db.brutos), searchable:true},
+    {name:'produto', label:'Produto', type:'select', options:()=>nomesOrdenados(db.brutos), searchableOverlay:true},
     {name:'fornecedor', label:'Fornecedor', type:'text'},
     {name:'quantidade', label:'Quantidade', type:'number', step:'0.01'},
     {name:'precoUnitario', label:'Preço Unitário (R$)', type:'number', step:'0.01'},
@@ -621,7 +628,7 @@ const defSaidasCentral = {
   fields:[
     {name:'data', label:'Data', type:'date', default:todayStr},
     {name:'documento', label:'Nº Documento', type:'text'},
-    {name:'produto', label:'Produto', type:'select', options:()=>nomesOrdenados(db.brutos), searchable:true},
+    {name:'produto', label:'Produto', type:'select', options:()=>nomesOrdenados(db.brutos), searchableOverlay:true},
     {name:'destino', label:'Local de Destino', type:'select', options:destinosCentralOptions},
     {name:'quantidade', label:'Quantidade', type:'number', step:'0.01'},
   ],
@@ -636,17 +643,20 @@ const defSaidasCentral = {
     const prodSel = form.querySelector('[name=produto]');
     const qtdInput = form.querySelector('[name=quantidade]');
     const hint = document.createElement('div'); hint.className='hint'; hint.id='saldoHint';
-    qtdInput.closest('.field').appendChild(hint);
+    const qtdField = qtdInput.closest('.field');
+    qtdField.style.position = 'relative';
+    hint.style.cssText = 'position:absolute;top:100%;left:0;margin-top:5px;white-space:nowrap';
+    qtdField.appendChild(hint);
     function update(){
       if(!prodSel.value){ hint.textContent=''; return; }
       const s = saldoCentral(prodSel.value);
       hint.textContent = `Saldo disponível na Central: ${fmtNum(s)}`;
       hint.className = 'hint' + (exceedsStock(qtdInput.value,s) ? ' warn' : '');
     }
-    prodSel.addEventListener('change', update); qtdInput.addEventListener('input', update); update();
+    prodSel.addEventListener('input', update); prodSel.addEventListener('change', update); qtdInput.addEventListener('input', update); update();
   },
   validate:(row, editIdx)=>{
-    if(!row.produto) return "Selecione o produto.";
+    if(!row.produto || !db.brutos.some(b=>b.nome===row.produto)) return "Selecione um produto bruto da lista.";
     if(!row.destino) return "Selecione o destino.";
     if(!row.quantidade || row.quantidade<=0) return "Informe uma quantidade válida.";
     let s = saldoCentral(row.produto);
@@ -720,7 +730,7 @@ const defSaidasFracionado = {
   fields:[
     {name:'data', label:'Data', type:'date', default:todayStr},
     {name:'documento', label:'Nº Documento', type:'text'},
-    {name:'produto', label:'Produto Fracionado', type:'select', options:()=>nomesOrdenados(db.fracionados), searchable:true},
+    {name:'produto', label:'Produto Fracionado', type:'select', options:()=>nomesOrdenados(db.fracionados), searchableOverlay:true},
     {name:'destino', label:'Local de Destino', type:'select', options:destinosFracionadoOptions},
     {name:'quantidade', label:'Quantidade', type:'number', step:'0.01'},
   ],
@@ -735,17 +745,20 @@ const defSaidasFracionado = {
     const prodSel = form.querySelector('[name=produto]');
     const qtdInput = form.querySelector('[name=quantidade]');
     const hint = document.createElement('div'); hint.className='hint'; hint.id='saldoHintFrac';
-    qtdInput.closest('.field').appendChild(hint);
+    const qtdField = qtdInput.closest('.field');
+    qtdField.style.position = 'relative';
+    hint.style.cssText = 'position:absolute;top:100%;left:0;margin-top:5px;white-space:nowrap';
+    qtdField.appendChild(hint);
     function update(){
       if(!prodSel.value){ hint.textContent=''; return; }
       const s = saldoCozinhaFracionado(prodSel.value);
       hint.textContent = `Disponível na Cozinha: ${fmtNum(s)}`;
       hint.className = 'hint' + (exceedsStock(qtdInput.value,s) ? ' warn' : '');
     }
-    prodSel.addEventListener('change', update); qtdInput.addEventListener('input', update); update();
+    prodSel.addEventListener('input', update); prodSel.addEventListener('change', update); qtdInput.addEventListener('input', update); update();
   },
   validate:(row, editIdx)=>{
-    if(!row.produto) return "Selecione o produto fracionado.";
+    if(!row.produto || !db.fracionados.some(f=>f.nome===row.produto)) return "Selecione um produto fracionado da lista.";
     if(!row.destino) return "Selecione o destino.";
     if(!row.quantidade || row.quantidade<=0) return "Informe uma quantidade válida.";
     let s = saldoCozinhaFracionado(row.produto);
@@ -798,7 +811,7 @@ const defAjustesEstoque = {
     prodSel.addEventListener('change', update); novoSaldoInput.addEventListener('input', update); update();
   },
   validate:(row, editIdx)=>{
-    if(!row.produto) return "Selecione o produto.";
+    if(!row.produto || !db.brutos.some(b=>b.nome===row.produto)) return "Selecione um produto bruto da lista.";
     if(row.novoSaldo==null || isNaN(row.novoSaldo) || row.novoSaldo<0) return "Informe o novo saldo (contagem física).";
     if(!row.motivo || !row.motivo.trim()) return "Informe o motivo do ajuste — todo ajuste precisa ser justificado.";
     if(!row.responsavel || !row.responsavel.trim()) return "Informe o responsável pelo ajuste.";
@@ -819,6 +832,31 @@ const defAjustesEstoque = {
 let crudEdit = null; // {key, idx} — controla o modo de edição de um registro já lançado
 let crudSearch = {};
 let crudCategoryFilter = {};
+
+let ajusteEdit = null;
+function renderAjustesEstoque(){
+  const c=document.getElementById('content');
+  const editable=canEditTab('ajustesEstoque');
+  const editing=ajusteEdit;
+  const source=editing ? (editing.tipo==='fracionado' ? db.ajustesFracionados : db.ajustesEstoque) : null;
+  const current=editing && source ? source[editing.idx] : null;
+  const allAjustes=[...(db.ajustesEstoque||[]).map((a,idx)=>({...a,tipo:'bruto',idx})),...(db.ajustesFracionados||[]).map((a,idx)=>({...a,tipo:'fracionado',idx}))].sort((a,b)=>String(b.data||'').localeCompare(String(a.data||'')));
+  c.innerHTML=`<h1 class="pagetitle">Ajuste de Estoque</h1><p class="pagesub">Corrija o saldo após uma contagem física de produtos brutos ou fracionados. Todo ajuste exige motivo e responsável.</p>${editable?`<div class="card"><h2>${current?'Editando Ajuste':'Novo Ajuste'}</h2><form class="entryform" id="form-ajuste-unificado"><div class="field"><label>Tipo de Produto</label><select name="tipo"><option value="">Selecione...</option><option value="bruto">Produto Bruto</option><option value="fracionado">Produto Fracionado</option></select></div><div class="field" style="position:relative"><label>Produto</label><input name="produto" autocomplete="off" placeholder="Escolha primeiro o tipo..."><div id="ajuste-produto-sugestoes" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:20;max-height:180px;overflow-y:auto;margin-top:5px;border:1px solid var(--border);border-radius:6px;background:#fff;box-shadow:0 8px 20px rgba(0,0,0,.12)"></div></div><div class="field"><label>Data</label><input type="date" name="data" readonly title="Data atual do dispositivo"></div><div class="field"><label>Novo Saldo (contagem física)</label><input type="number" name="novoSaldo" step="0.01" min="0"></div><div class="field"><label>Motivo do Ajuste</label><input type="text" name="motivo"></div><div class="field"><label>Responsável pelo Ajuste</label><input type="text" name="responsavel"></div><div class="field"><label>&nbsp;</label><div style="display:flex;gap:8px"><button class="btn" type="submit">${current?'Salvar alterações':'Registrar ajuste'}</button>${current?'<button class="btn secondary" type="button" id="cancelar-ajuste">Cancelar</button>':''}</div></div><div class="hint" id="ajuste-unificado-hint"></div></form></div>`:'<div class="msg-ok" style="margin-bottom:18px">Acesso visualizador: os ajustes estão disponíveis apenas para consulta.</div>'}<div class="card"><h2>Histórico de Ajustes (${allAjustes.length})</h2>${allAjustes.length?`<table><thead><tr><th>Data</th><th>Tipo</th><th>Produto</th><th>Saldo Anterior</th><th>Novo Saldo</th><th>Diferença</th><th>Motivo</th><th>Responsável</th>${editable?'<th></th>':''}</tr></thead><tbody>${allAjustes.map(a=>{const dif=Number(a.diferenca||0);return `<tr><td>${fmtDate(a.data)}</td><td>${a.tipo==='bruto'?'Bruto':'Fracionado'}</td><td><strong>${escapeHtml(a.produto||'')}</strong></td><td>${fmtNum(a.saldoAnterior)}</td><td>${fmtNum(a.novoSaldo)}</td><td>${dif>0?'+':''}${fmtNum(dif)}</td><td>${escapeHtml(a.motivo||'')}</td><td>${escapeHtml(a.responsavel||'')}</td>${editable?`<td><button class="edit-ajuste" data-tipo="${a.tipo}" data-idx="${a.idx}" title="Editar">✎</button> <button class="del-ajuste" data-tipo="${a.tipo}" data-idx="${a.idx}" title="Excluir">✕</button></td>`:''}</tr>`;}).join('')}</tbody></table>`:'<div class="empty">Nenhum ajuste registrado ainda.</div>'}</div>`;
+  c.querySelector('.card')?.classList.add('ajuste-entry-card');
+  if(!editable) return;
+  const form=c.querySelector('#form-ajuste-unificado'), tipo=form.querySelector('[name=tipo]'), produto=form.querySelector('[name=produto]'), sugestoes=form.querySelector('#ajuste-produto-sugestoes'), novoSaldo=form.querySelector('[name=novoSaldo]'), hint=form.querySelector('#ajuste-unificado-hint');
+  const options=()=>tipo.value==='fracionado'?nomesOrdenados(db.fracionados):nomesOrdenados(db.brutos);
+  function saldoAtual(){return tipo.value==='fracionado'?saldoCozinhaFracionado(produto.value):saldoCentral(produto.value);}
+  function atualizarHint(){if(!produto.value){hint.textContent='';return;}const atual=saldoAtual(),dif=Number(novoSaldo.value||0)-atual;hint.textContent=`Saldo atual no sistema: ${fmtNum(atual)} → diferença do ajuste: ${dif>0?'+':''}${fmtNum(dif)}`;}
+  function atualizarProdutos(value){produto.disabled=!tipo.value;produto.placeholder=tipo.value?'Digite o nome do produto...':'Escolha primeiro o tipo...';produto.value=value||'';atualizarHint();}
+  function mostrarSugestoes(){const termo=searchText(produto.value);const itens=termo?options().filter(nome=>searchText(nome).includes(termo)).slice(0,12):[];sugestoes.style.display=itens.length?'block':'none';sugestoes.innerHTML=itens.map(nome=>`<button type="button" class="ajuste-produto-sugestao" data-nome="${escapeHtml(nome)}" style="display:block;width:100%;padding:8px 10px;border:0;border-bottom:1px solid var(--border);background:#fff;text-align:left;cursor:pointer">${escapeHtml(nome)}</button>`).join('');sugestoes.querySelectorAll('.ajuste-produto-sugestao').forEach(btn=>btn.addEventListener('click',()=>{produto.value=btn.dataset.nome;sugestoes.style.display='none';atualizarHint();}));}
+  tipo.value=current?editing.tipo:'';atualizarProdutos(current&&current.produto);form.querySelector('[name=data]').value=todayStr();novoSaldo.value=current?current.novoSaldo:'';form.querySelector('[name=motivo]').value=current?current.motivo||'':'';form.querySelector('[name=responsavel]').value=current?current.responsavel||'':'';
+  tipo.addEventListener('change',()=>{atualizarProdutos('');mostrarSugestoes();});produto.addEventListener('input',()=>{atualizarHint();mostrarSugestoes();});novoSaldo.addEventListener('input',atualizarHint);
+  form.addEventListener('submit',e=>{e.preventDefault();const row={data:todayStr(),produto:produto.value,novoSaldo:parseFloat(novoSaldo.value),motivo:form.querySelector('[name=motivo]').value,responsavel:form.querySelector('[name=responsavel]').value};if(!tipo.value||!row.produto||isNaN(row.novoSaldo)||row.novoSaldo<0||!row.motivo.trim()||!row.responsavel.trim()){alert('Preencha tipo de produto, produto, novo saldo, motivo e responsável.');return;}if(!options().some(nome=>sameName(nome,row.produto))){alert('Selecione um produto da lista de sugestões.');return;}let atual=saldoAtual();if(current&&editing.tipo===tipo.value&&current.produto===row.produto)atual-=Number(current.diferenca||0);row.saldoAnterior=atual;row.diferenca=row.novoSaldo-atual;const target=tipo.value==='fracionado'?db.ajustesFracionados:db.ajustesEstoque;if(current)source.splice(editing.idx,1);target.push(row);ajusteEdit=null;saveDB();render();});
+  c.querySelector('#cancelar-ajuste')?.addEventListener('click',()=>{ajusteEdit=null;render();});
+  c.querySelectorAll('.edit-ajuste').forEach(btn=>btn.addEventListener('click',()=>{ajusteEdit={tipo:btn.dataset.tipo,idx:parseInt(btn.dataset.idx)};render();}));
+  c.querySelectorAll('.del-ajuste').forEach(btn=>btn.addEventListener('click',()=>{if(confirm('Excluir este ajuste?')){const target=btn.dataset.tipo==='fracionado'?db.ajustesFracionados:db.ajustesEstoque;target.splice(parseInt(btn.dataset.idx),1);saveDB();render();}}));
+}
 
 function renderCrud(def){
   const c = document.getElementById('content');
@@ -842,6 +880,7 @@ function renderCrud(def){
     </div>
   `;
   c.appendChild(wrap);
+  if(def.fields.some(f=>f.searchableOverlay)) wrap.querySelector('.card')?.classList.add('form-search-overlay-card');
 
   const form = wrap.querySelector(`#form-${def.key}`);
   if(!editable){
@@ -858,7 +897,28 @@ function renderCrud(def){
     let input;
     if(f.type==='select'){
       const options = [...(f.options()||[])].sort(compareText);
-      if(f.searchable){
+      if(f.searchableOverlay){
+        fieldDiv.style.position = 'relative';
+        input = document.createElement('input'); input.name=f.name; input.autocomplete='off'; input.placeholder='Digite para buscar...';
+        const suggestions = document.createElement('div');
+        suggestions.className = 'produto-sugestoes';
+        suggestions.style.cssText = 'display:none;position:absolute;top:100%;left:0;right:0;z-index:20;max-height:180px;overflow-y:auto;margin-top:5px;border:1px solid var(--border);border-radius:6px;background:#fff;box-shadow:0 8px 20px rgba(0,0,0,.12)';
+        const showSuggestions = ()=>{
+          const termo = searchText(input.value);
+          const items = termo ? options.filter(opt=>searchText(opt).includes(termo)).slice(0,12) : [];
+          suggestions.innerHTML = items.map(opt=>`<button type="button" data-value="${escapeHtml(opt)}" style="display:block;width:100%;padding:8px 10px;border:0;border-bottom:1px solid var(--border);background:#fff;text-align:left;cursor:pointer">${escapeHtml(opt)}</button>`).join('');
+          suggestions.style.display = items.length ? 'block' : 'none';
+          suggestions.querySelectorAll('button').forEach(option=>option.addEventListener('click',()=>{
+            input.value = option.dataset.value;
+            suggestions.style.display = 'none';
+            input.dispatchEvent(new Event('change', {bubbles:true}));
+          }));
+        };
+        input.addEventListener('input', showSuggestions);
+        input.addEventListener('focus', showSuggestions);
+        input.addEventListener('blur', ()=>setTimeout(()=>{suggestions.style.display='none';},150));
+        fieldDiv.appendChild(input); fieldDiv.appendChild(suggestions);
+      } else if(f.searchable){
         const listId = `options-${def.key}-${f.name}`;
         input = document.createElement('input'); input.name=f.name; input.setAttribute('list',listId); input.autocomplete='off'; input.placeholder='Digite para buscar…';
         const list=document.createElement('datalist'); list.id=listId; options.forEach(opt=>{const o=document.createElement('option');o.value=opt;list.appendChild(o);});
@@ -906,8 +966,15 @@ function renderCrud(def){
       const el = form.querySelector(`[name=${f.name}]`);
       row[f.name] = f.type==='number' ? parseFloat(el.value||0) : el.value;
     });
+    // Ao editar, manter o mesmo nome do registro não deve ser tratado como
+    // duplicidade. Isso também permite corrigir cadastros antigos que já
+    // possuam nomes equivalentes no banco (inclusive com acentos diferentes).
+    const nomeMantido = editingRow && (def.key==='brutos' || def.key==='fracionados') && sameName(editingRow.nome, row.nome);
     const err = def.validate ? def.validate(row, editing) : null;
-    if(err){ alert(err); return; }
+    const duplicidadeDoProprioNome = nomeMantido && err && err.startsWith('Já existe um produto');
+    if(err && !duplicidadeDoProprioNome){
+      alert(err); return;
+    }
     if(def.beforeSave) def.beforeSave(row, editing);
     if(editing!=null){ db[def.key][editing] = row; }
     else { db[def.key].push(row); }
@@ -1663,14 +1730,16 @@ async function renderUsuarios(){
       btn.addEventListener('click', async ()=>{
         const id = btn.dataset.id;
         const email = btn.dataset.email;
-        const motivo = prompt(`Motivo da exclusão/bloqueio de ${email}:`, 'Acesso removido pelo Master');
-        if(motivo===null) return;
-        if(!confirm(`Excluir o acesso de ${email}?\n\nA pessoa não conseguirá mais usar o sistema, mas o histórico e os logs serão preservados.`)) return;
+        if(!confirm(`Excluir permanentemente o acesso de ${email}?\n\nO acesso será removido da lista. O histórico e os logs serão preservados.`)) return;
         try{
-          await window.__estoqueAccess.deleteUser({ user_id: id, motivo: motivo.trim() || 'Acesso removido pelo Master' });
-          alert('Acesso excluído de forma segura.');
-          renderUsuarios();
+          btn.disabled = true;
+          btn.textContent = 'Excluindo...';
+          await window.__estoqueAccess.deleteUser({ user_id: id, motivo: 'Acesso removido pelo Master' });
+          alert('Acesso excluído com sucesso.');
+          await renderUsuarios();
         }catch(err){
+          btn.disabled = false;
+          btn.textContent = 'Excluir';
           alert('Não foi possível excluir o acesso: ' + (err.message || err));
         }
       });
@@ -1883,22 +1952,25 @@ function renderRelatorios(){
     }
     html += `</div>`;
   } else if(reportType==='ajustes'){
-    const ajustesP = filterByDateRange(db.ajustesEstoque, inicio, fim);
+    const ajustesP = [
+      ...filterByDateRange(db.ajustesEstoque||[], inicio, fim).map(a=>({...a,tipo:'Bruto'})),
+      ...filterByDateRange(db.ajustesFracionados||[], inicio, fim).map(a=>({...a,tipo:'Fracionado'})),
+    ];
     html += `<div class="card"><h2>Ajustes de Estoque no Período</h2>`;
     if(ajustesP.length===0){
       html += `<div class="empty">Nenhum ajuste de estoque registrado nesse período.</div>`;
     } else {
       let totalDiferenca = 0;
-      html += `<table><thead><tr><th>Data</th><th>Produto</th><th>Saldo Anterior</th><th>Novo Saldo</th><th>Diferença</th><th>Motivo</th><th>Responsável</th></tr></thead><tbody>`;
+      html += `<table><thead><tr><th>Data</th><th>Tipo</th><th>Produto</th><th>Saldo Anterior</th><th>Novo Saldo</th><th>Diferença</th><th>Motivo</th><th>Responsável</th></tr></thead><tbody>`;
       [...ajustesP].sort((a,b)=> a.data < b.data ? 1 : -1).forEach(a=>{
         const dif = Number(a.diferenca||0);
         totalDiferenca += dif;
         const cor = dif>0 ? 'var(--ok, #1a7a3c)' : (dif<0 ? 'var(--danger, #b3261e)' : 'inherit');
-        html += `<tr><td>${fmtDate(a.data)}</td><td><strong>${a.produto}</strong></td><td>${fmtNum(a.saldoAnterior)}</td><td>${fmtNum(a.novoSaldo)}</td>
+        html += `<tr><td>${fmtDate(a.data)}</td><td>${a.tipo}</td><td><strong>${a.produto}</strong></td><td>${fmtNum(a.saldoAnterior)}</td><td>${fmtNum(a.novoSaldo)}</td>
           <td style="color:${cor}">${dif>0?'+':''}${fmtNum(dif)}</td><td>${a.motivo||''}</td><td>${a.responsavel||''}</td></tr>`;
       });
       const corTotal = totalDiferenca>0 ? 'var(--ok, #1a7a3c)' : (totalDiferenca<0 ? 'var(--danger, #b3261e)' : 'inherit');
-      html += `<tr class="subtotal-row"><td colspan="4">Total (ajuste líquido no período)</td><td style="color:${corTotal}">${totalDiferenca>0?'+':''}${fmtNum(totalDiferenca)}</td><td colspan="2"></td></tr>`;
+      html += `<tr class="subtotal-row"><td colspan="5">Total (ajuste líquido no período)</td><td style="color:${corTotal}">${totalDiferenca>0?'+':''}${fmtNum(totalDiferenca)}</td><td colspan="2"></td></tr>`;
       html += `</tbody></table>`;
       const porProdutoAjuste = {};
       ajustesP.forEach(a=>{ porProdutoAjuste[a.produto] = (porProdutoAjuste[a.produto]||0) + Number(a.diferenca||0); });
@@ -2469,7 +2541,7 @@ function renderImportarNF(container, embedded=false){
   const c = container || document.getElementById('content');
   let html = embedded ? `<h2 style="margin:0 0 8px">Importar Nota Fiscal (PDF)</h2><p class="pagesub" style="margin-bottom:16px">Envie o PDF da nota fiscal eletrônica (NF-e/DANFE) para ler os produtos automaticamente e lançar a entrada na Central.</p>` : `<h1 class="pagetitle">Importar Nota Fiscal (PDF)</h1><p class="pagesub">Envie o PDF da nota fiscal eletrônica (NF-e/DANFE) para ler os produtos automaticamente e lançar a entrada na Central.</p>`;
 
-  html += `<div class="card"><h2>1. Selecione o PDF</h2>
+  html += `<div class="card"><h2>Selecione o PDF</h2>
     <div class="field" style="max-width:420px">
       <label>Arquivo da Nota Fiscal (.pdf)</label>
       <input type="file" id="inputNF" accept="application/pdf,.pdf">
@@ -2517,7 +2589,7 @@ function renderImportarNF(container, embedded=false){
         }
       });
       html += `</tbody></table>`;
-      html += `<div style="margin-top:16px"><button class="btn" id="btnConfirmarNF">✓ Confirmar e Lançar no Estoque</button></div>`;
+      html += `<div style="margin-top:16px;display:flex;gap:10px;align-items:center"><button class="btn" id="btnConfirmarNF">✓ Confirmar e Lançar no Estoque</button><button class="btn secondary" type="button" id="btnCancelarNF">Cancelar PDF</button></div>`;
     }
     html += `</div>`;
 
@@ -2558,6 +2630,12 @@ function renderImportarNF(container, embedded=false){
   c.querySelectorAll('.nfNovaUnidade').forEach(el=> el.addEventListener('change', e=>{ nfImport.itens[+e.target.dataset.i].novaUnidade = e.target.value; }));
   c.querySelectorAll('.nfNovoMinimo').forEach(el=> el.addEventListener('input', e=>{ nfImport.itens[+e.target.dataset.i].novoMinimo = parseFloat(e.target.value)||0; }));
   c.querySelectorAll('.nfNovaValidade').forEach(el=> el.addEventListener('input', e=>{ nfImport.itens[+e.target.dataset.i].novaValidadeDias = parseFloat(e.target.value)||0; }));
+
+  c.querySelector('#btnCancelarNF')?.addEventListener('click', ()=>{
+    if(!confirm('Cancelar a importação deste PDF? Nenhum item será lançado no estoque.')) return;
+    nfImport = null;
+    render();
+  });
 
   c.querySelector('#btnConfirmarNF')?.addEventListener('click', ()=>{
     const header = nfImport.header;
@@ -2714,7 +2792,7 @@ function renderImportarXML(container, embedded=false){
   const notaDuplicada = xmlImport ? findNotaJaLancada(xmlImport.header) : null;
   let html = embedded ? `<h2 style="margin:0 0 8px">Importar Nota Fiscal (XML)</h2><p class="pagesub" style="margin-bottom:16px">Envie o XML da NF-e para testar a leitura automática de itens, quantidade e preço de custo.</p>` : `<h1 class="pagetitle">Importar Nota Fiscal (XML)</h1><p class="pagesub">Envie o XML da NF-e para testar a leitura automática de itens, quantidade e preço de custo.</p>`;
 
-  html += `<div class="card"><h2>1. Selecione o XML</h2>
+  html += `<div class="card"><h2>Selecione o XML</h2>
     <div class="field" style="max-width:420px">
       <label>Arquivo da Nota Fiscal (.xml)</label>
       <input type="file" id="inputXML" accept="text/xml,application/xml,.xml">
@@ -2763,7 +2841,7 @@ function renderImportarXML(container, embedded=false){
         }
       });
       html += `</tbody></table>`;
-      html += `<div style="margin-top:16px"><button class="btn" id="btnConfirmarXML" ${notaDuplicada?'disabled title="Nota já importada"':''}>Confirmar e Lançar no Estoque</button></div>`;
+      html += `<div style="margin-top:16px;display:flex;gap:10px;align-items:center"><button class="btn" id="btnConfirmarXML" ${notaDuplicada?'disabled title="Nota já importada"':''}>Confirmar e Lançar no Estoque</button><button class="btn secondary" type="button" id="btnCancelarXML">Cancelar XML</button></div>`;
     }
     html += `</div>`;
 
@@ -2798,6 +2876,12 @@ function renderImportarXML(container, embedded=false){
   c.querySelectorAll('.xmlNovaUnidade').forEach(el=> el.addEventListener('change', e=>{ xmlImport.itens[+e.target.dataset.i].novaUnidade = e.target.value; }));
   c.querySelectorAll('.xmlNovoMinimo').forEach(el=> el.addEventListener('input', e=>{ xmlImport.itens[+e.target.dataset.i].novoMinimo = parseFloat(e.target.value)||0; }));
   c.querySelectorAll('.xmlNovaValidade').forEach(el=> el.addEventListener('input', e=>{ xmlImport.itens[+e.target.dataset.i].novaValidadeDias = parseFloat(e.target.value)||0; }));
+
+  c.querySelector('#btnCancelarXML')?.addEventListener('click', ()=>{
+    if(!confirm('Cancelar a importação deste XML? Nenhum item será lançado no estoque.')) return;
+    xmlImport = null;
+    render();
+  });
 
   c.querySelector('#btnConfirmarXML')?.addEventListener('click', ()=>{
     if(!ensureCanEdit()) return;
