@@ -3116,14 +3116,14 @@ initLock();
     function draw(){
       const q=searchText(query);
       const filtered=all.filter(item=>(!q||searchText(item.nome).includes(q))&&(!category||item.categoria===category));
-      if(key==='estoqueCentral'){
+      if(key==='estoqueCentral'||key==='estoqueFracionados'){
         filtered.sort((a,b)=>{
           const difference=Number(saldo(a))-Number(saldo(b));
           return difference ? (saldoOrder==='asc'?difference:-difference) : compareText(a.nome,b.nome);
         });
       }
       const shown=filtered.slice(0,limit);
-      const saldoHeader=key==='estoqueCentral'?'<th>Saldo Atual <button type="button" class="stock-sort-button" id="sort-central-saldo" title="Ordenar saldo '+(saldoOrder==='asc'?'decrescente':'crescente')+'" aria-label="Ordenar saldo '+(saldoOrder==='asc'?'decrescente':'crescente')+'">'+(saldoOrder==='asc'?'▲':'▼')+'</button></th>':'<th>Saldo Atual</th>';
+      const saldoHeader=(key==='estoqueCentral'||key==='estoqueFracionados')?'<th>Saldo Atual <button type="button" class="stock-sort-button" id="sort-stock-saldo" title="Ordenar saldo '+(saldoOrder==='asc'?'decrescente':'crescente')+'" aria-label="Ordenar saldo '+(saldoOrder==='asc'?'decrescente':'crescente')+'">'+(saldoOrder==='asc'?'▲':'▼')+'</button></th>':'<th>Saldo Atual</th>';
       c.innerHTML='<h1 class="pagetitle">'+title+'</h1><p class="pagesub">'+subtitle+'</p><div class="card"><h2>'+heading+'</h2>'+screenSearchTool(key,'Buscar produto')+'<p class="footnote" id="paged-stock-count"></p><table><thead><tr><th>Produto</th>'+(showProductType?'<th>Tipo de Produto</th>':'')+'<th>Categoria</th><th>Unidade</th>'+saldoHeader+'<th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>'+shown.map(item=>{const atual=saldo(item);return '<tr class="screen-search-row"><td><strong>'+escapeHtml(item.nome)+'</strong></td>'+(showProductType?'<td>'+escapeHtml(item.tipoProduto||defaultProductType)+'</td>':'')+'<td>'+escapeHtml(item.categoria||'—')+'</td><td>'+escapeHtml(item.unidade||'—')+'</td><td>'+fmtNum(atual)+'</td><td>'+fmtNum(item.estoqueMinimo)+'</td><td>'+statusBadge(atual,item.estoqueMinimo)+'</td></tr>';}).join('')+'</tbody></table>'+(shown.length<filtered.length?'<button type="button" class="btn secondary" id="paged-more-'+key+'">Mostrar mais ('+(filtered.length-shown.length)+')</button>':'')+'</div>';
       c.querySelector('#paged-stock-count').textContent='Mostrando '+shown.length+' de '+filtered.length+' produto(s).';
       const input=c.querySelector('#screen-search-'+key);input.value=query;
@@ -3150,7 +3150,7 @@ initLock();
           nextInput.setSelectionRange(query.length,query.length);
         }
       });
-      c.querySelector('#sort-central-saldo')?.addEventListener('click',()=>{
+      c.querySelector('#sort-stock-saldo')?.addEventListener('click',()=>{
         saldoOrder=saldoOrder==='asc'?'desc':'asc';
         draw();
       });
