@@ -198,6 +198,8 @@
   .tipoProduto:focus,.tipoProdutoFracionado:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-light);}
   .linkbtn{background:none;border:none;color:var(--gold-dark);text-decoration:underline;cursor:pointer;font-size:inherit;padding:0;}
   .linkbtn:hover{color:var(--black);}
+  .stock-sort-button{border:0;background:transparent;color:var(--gold-dark);cursor:pointer;font-size:11px;line-height:1;padding:0 0 0 4px;vertical-align:middle;}
+  .stock-sort-button:hover,.stock-sort-button:focus-visible{color:var(--black);outline:none;}
   .daygroup-title{margin:18px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:#8a8375;}
   .daygroup-title:first-of-type{margin-top:4px;}
   .empty{color:#999;font-style:italic;padding:14px 0;}
