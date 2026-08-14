@@ -181,6 +181,20 @@
   .delbtn:hover{color:var(--red);}
   .editbtn{background:none;border:none;color:#aaa;cursor:pointer;font-size:15px;font-weight:700;width:30px;height:30px;border-radius:8px;}
   .editbtn:hover{color:var(--gold-dark);}
+.product-edit-modal{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(30,24,16,.48);backdrop-filter:blur(2px);}
+.product-edit-modal__panel{width:min(980px,100%);max-height:calc(100vh - 48px);overflow-y:auto;overflow-x:hidden;background:linear-gradient(180deg,#fff,#fffcf7);border:1px solid rgba(210,195,171,.9);border-radius:12px;box-shadow:0 28px 80px rgba(0,0,0,.3);}
+.product-edit-modal__header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:22px 24px 16px;border-bottom:1px solid rgba(210,195,171,.65);}
+.product-edit-modal__header h2{margin:0;color:var(--ink);font-size:18px;}
+.product-edit-modal__header p{margin:5px 0 0;color:var(--muted);font-size:13px;}
+.product-edit-modal__close{width:34px;height:34px;border:0;border-radius:8px;background:transparent;color:#8a8177;font-size:28px;line-height:1;cursor:pointer;}
+.product-edit-modal__close:hover{background:#f5eee3;color:var(--red);}
+.product-edit-modal__body{padding:22px 24px 26px;}
+.product-edit-modal__body form.entryform{grid-template-columns:repeat(4,minmax(0,1fr));}
+.product-edit-modal__body .field{min-width:0;}
+.product-edit-modal__body .field input,.product-edit-modal__body .field select{min-width:0;width:100%;box-sizing:border-box;}
+.product-edit-modal__body .field:last-child{grid-column:span 2;justify-content:end;}
+@media(max-width:760px){.product-edit-modal{padding:12px}.product-edit-modal__header,.product-edit-modal__body{padding-left:16px;padding-right:16px}.product-edit-modal__body form.entryform{grid-template-columns:repeat(2,minmax(0,1fr))}.product-edit-modal__body .field:last-child{grid-column:span 2}.product-edit-modal__body .field:last-child .btn{flex:1;}}
+@media(max-width:460px){.product-edit-modal__body form.entryform{grid-template-columns:1fr}.product-edit-modal__body .field:last-child{grid-column:span 1}.product-edit-modal__header h2{font-size:16px;}}
 .edit-ajuste,.del-ajuste{background:none;border:none;padding:0;color:#aaa;cursor:pointer;font-size:15px;font-weight:700;line-height:1;}
 .card.ajuste-entry-card{min-height:240px;overflow-x:visible;overflow-y:visible;}
 .card.form-search-overlay-card{min-height:240px;overflow-x:visible;overflow-y:visible;}

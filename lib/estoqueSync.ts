@@ -61,12 +61,13 @@ const clean = (value: unknown) => {
   return text.length > 0 ? text : null;
 };
 
-const movementKeys: Array<keyof Pick<LegacyDB, "entradasCentral" | "saidasCentral" | "producoes" | "saidasFracionado" | "ajustesEstoque" | "pedidosCompra">> = [
+const movementKeys: Array<keyof Pick<LegacyDB, "entradasCentral" | "saidasCentral" | "producoes" | "saidasFracionado" | "ajustesEstoque" | "ajustesFracionados" | "pedidosCompra">> = [
   "entradasCentral",
   "saidasCentral",
   "producoes",
   "saidasFracionado",
   "ajustesEstoque",
+  "ajustesFracionados",
   "pedidosCompra",
 ];
 
@@ -232,8 +233,10 @@ async function createCheckpoint(supabase: SupabaseClient, user: User, db: Legacy
   if (error) throw new Error(`Não foi possível criar o ponto de recuperação: ${error.message}`);
 }
 
-async function selectAll<T>(supabase: SupabaseClient, table: string, columns = "*") {
-  const { data, error } = await supabase.from(table).select(columns).order("criado_em", { ascending: true });
+async function selectAll<T>(supabase: SupabaseClient, table: string, columns = "*", somenteAtivos = false) {
+  let query = supabase.from(table).select(columns).order("criado_em", { ascending: true });
+  if (somenteAtivos) query = query.eq("ativo", true);
+  const { data, error } = await query;
   if (error) throw error;
   return (data ?? []) as T[];
 }
@@ -276,7 +279,7 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
     ...emptyDB(),
     categorias: categorias.map((c) => ({ nome: c.nome })),
     locais: locais.map((l) => ({ nome: l.nome, tipo: l.tipo, responsavel: l.responsavel ?? "" })),
-    brutos: brutos.map((p) => ({
+    brutos: brutos.filter((p) => p.ativo !== false).map((p) => ({
       nome: p.nome,
       categoria: categoriaPorId.get(p.categoria_id)?.nome ?? "Outros",
       tipoProduto: p.tipo_produto ?? "Bruto",
@@ -286,7 +289,7 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
       precoMedio: num(p.preco_medio),
       validadeDias: num(p.validade_dias),
     })),
-    fracionados: fracionados.map((p) => ({
+    fracionados: fracionados.filter((p) => p.ativo !== false).map((p) => ({
       nome: p.nome,
       categoria: categoriaPorId.get(p.categoria_id)?.nome ?? "Outros",
       tipoProduto: p.tipo_produto ?? "Fracionado",
@@ -294,6 +297,8 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
       origem: brutoPorId.get(p.origem_bruto_id)?.nome ?? "",
       rendimento: num(p.rendimento_percent),
       estoqueMinimo: num(p.estoque_minimo),
+      fornecedor: p.fornecedor ?? "",
+      precoMedio: num(p.preco_medio),
       validadeDias: num(p.validade_dias),
     })),
     entradasCentral: entradas.map((e) => ({
@@ -390,7 +395,7 @@ function atomicPayload(db: LegacyDB) {
     })),
     fracionados: (db.fracionados ?? []).map((x) => ({
       nome: x.nome, categoria: x.categoria, tipo_produto: x.tipoProduto ?? "Fracionado", unidade: x.unidade, origem: x.origem, rendimento: num(x.rendimento),
-      estoque_minimo: num(x.estoqueMinimo), validade_dias: num(x.validadeDias),
+      estoque_minimo: num(x.estoqueMinimo), fornecedor: x.fornecedor, preco_medio: num(x.precoMedio), validade_dias: num(x.validadeDias),
     })),
     entradasCentral: (db.entradasCentral ?? []).map((x) => ({
       data: x.data, nf: x.nf, produto: x.produto, fornecedor: x.fornecedor, quantidade: num(x.quantidade),
@@ -623,6 +628,8 @@ async function saveFracionadosExpanded(supabase: SupabaseClient, user: User, db:
       origem_bruto_id: brutoMap.get(p.origem)?.id ?? null,
       rendimento_percent: num(p.rendimento) || 100,
       estoque_minimo: num(p.estoqueMinimo),
+      fornecedor: clean(p.fornecedor),
+      preco_medio: num(p.precoMedio),
       validade_dias: num(p.validadeDias),
       ativo: true,
     })),
@@ -1041,15 +1048,12 @@ export function installCloudSync(
               const normalizedMessage = message.toLowerCase();
               const safeDeleteBlocked = code === "21000" && normalizedMessage.includes("delete requires a where clause");
               if (safeDeleteBlocked) {
+                throw new Error(`O banco recusou uma exclusão interna de sincronização: ${message}. Nenhuma alteração foi salva.`);
                 // Alguns projetos Supabase ativam a proteção pg_safeupdate,
                 // que rejeita o DELETE interno da função SQL antiga. A rota
                 // abaixo usa somente deletes com filtro explícito e mantém o
                 // sistema operante até a função do banco ser atualizada.
-                await createCheckpoint(supabase, user, remoteDB);
-                await saveLegacyDB(supabase, user, mergedDB, scope);
-                stockRevision = remoteRevision;
-                savedDB = mergedDB;
-                break;
+                throw new Error("A sincronizaÃ§Ã£o segura foi bloqueada pelo banco. Nenhuma alteraÃ§Ã£o foi salva; atualize a funÃ§Ã£o de sincronizaÃ§Ã£o antes de tentar novamente.");
               }
               const revisionConflict = code === "40001" || normalizedMessage.includes("outra sessao") || normalizedMessage.includes("outra sessão") || normalizedMessage.includes("revisao") || normalizedMessage.includes("revisão");
               if (!revisionConflict || attempt === 4) throw saveError;

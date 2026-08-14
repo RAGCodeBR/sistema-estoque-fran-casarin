@@ -26,7 +26,7 @@ const STORAGE_KEY = "estoqueFranCasarinDB_v1";
 
 // O Controle de Fracionados também cadastra os produtos que produz e registra
 // a retirada de insumos da Central para a cozinha.
-const FRACIONADOS_TABS = new Set(['estoqueCentral','estoqueFracionados','fracionados','saidasCentral','producoes','saidasFracionado']);
+const FRACIONADOS_TABS = new Set(['estoqueCentral','fracionados','saidasCentral','producoes','saidasFracionado']);
 const FRACIONADOS_EDIT_TABS = new Set(['fracionados','saidasCentral','producoes','saidasFracionado']);
 const PERFIS_SIMULAVEIS = new Set(['master','administrador','controle_fracionados','visualizador']);
 function previewSimulationAllowed(){
@@ -416,6 +416,8 @@ function setActiveNav(){
 
 /* ============================= RENDER ROOT ============================= */
 function render(){
+  // A tela consolidada substituiu a antiga aba exclusiva de fracionados.
+  if(currentTab==='estoqueFracionados') currentTab='estoqueCentral';
   if(!canViewTab(currentTab)) currentTab = isFracionadosAccess() ? 'estoqueCentral' : 'dashboard';
   try{localStorage.setItem(CURRENT_TAB_KEY,currentTab);}catch(e){}
   document.getElementById('todayLabel').textContent = "Hoje: " + fmtDate(todayStr());
@@ -423,7 +425,7 @@ function render(){
   updateSidebarBadges();
   const c = document.getElementById('content');
   const renderers = {
-    dashboard: renderDashboard, estoqueCentral: renderEstoqueCentral, estoqueFracionados: renderEstoqueFracionados, compras: renderCompras, alertas: renderAlertas,
+    dashboard: renderDashboard, estoqueCentral: renderEstoqueCentral, compras: renderCompras, alertas: renderAlertas,
     relatorios: renderRelatorios, backup: renderBackup, importacao: renderImportacao,
     conferenciaPedidos: renderConferenciaPedidos, seguranca: renderSeguranca,
     usuarios: renderUsuarios,
@@ -484,7 +486,7 @@ const defBrutos = {
   beforeSave:(row,editIdx)=>{
     if(editIdx!=null) renameBrutoReferences(db.brutos[editIdx] && db.brutos[editIdx].nome,row.nome);
   },
-  canDelete:brutoCanDelete
+  canDelete:()=>null
 };
 
 const defFracionados = {
@@ -496,6 +498,8 @@ const defFracionados = {
     {name:'origem', label:'Produto Bruto de Origem (opcional)', type:'select', options:()=>nomesOrdenados(db.brutos), searchable:true},
     {name:'rendimento', label:'Rendimento Padrão (%)', type:'number', step:'1'},
     {name:'estoqueMinimo', label:'Estoque Mínimo', type:'number', step:'0.01'},
+    {name:'fornecedor', label:'Fornecedor Padrão', type:'text'},
+    {name:'precoMedio', label:'Preço Médio (R$)', type:'number', step:'0.01'},
     {name:'validadeDias', label:'Validade Após Fracionar (dias)', type:'number'},
   ],
   columns:[
@@ -506,6 +510,8 @@ const defFracionados = {
     {label:'Unidade', render:r=>r.unidade},
     {label:'Rendimento', render:r=>fmtNum(r.rendimento)+"%"},
     {label:'Estoque Mínimo', render:r=>fmtNum(r.estoqueMinimo)},
+    {label:'Fornecedor', render:r=>r.fornecedor||"—"},
+    {label:'Preço Médio', render:r=>fmtMoney(r.precoMedio||0)},
     {label:'Saldo na Cozinha', render:r=>fmtNum(saldoCozinhaFracionado(r.nome))},
     {label:'Status', render:r=>statusBadge(saldoCozinhaFracionado(r.nome), r.estoqueMinimo||0)},
   ],
@@ -517,7 +523,7 @@ const defFracionados = {
   beforeSave:(row,editIdx)=>{
     if(editIdx!=null) renameFracionadoReferences(db.fracionados[editIdx] && db.fracionados[editIdx].nome,row.nome);
   },
-  canDelete:fracionadoCanDelete
+  canDelete:()=>null
 };
 
 const defLocais = {
@@ -859,10 +865,12 @@ function renderAjustesEstoque(){
 }
 
 function renderCrud(def){
+  document.getElementById('product-edit-modal')?.remove();
   const c = document.getElementById('content');
   const editable = canEditTab(def.key);
   const editing = (crudEdit && crudEdit.key===def.key) ? crudEdit.idx : null;
   const editingRow = editing!=null ? db[def.key][editing] : null;
+  const productEditModal = editing!=null && (def.key==='brutos' || def.key==='fracionados');
   const wrap = document.createElement('div');
   wrap.innerHTML = `
     <h1 class="pagetitle">${def.title}</h1>
@@ -983,6 +991,24 @@ function renderCrud(def){
     render();
   });
 
+  if(productEditModal){
+    const editorCard = form.closest('.card');
+    const modal = document.createElement('div');
+    modal.id = 'product-edit-modal';
+    modal.className = 'product-edit-modal';
+    modal.setAttribute('role','dialog');
+    modal.setAttribute('aria-modal','true');
+    modal.setAttribute('aria-label',`Editar ${editingRow.nome}`);
+    modal.innerHTML = `<div class="product-edit-modal__panel"><div class="product-edit-modal__header"><div><h2>Editar produto</h2><p>Altere as informações do cadastro e salve para confirmar.</p></div><button type="button" class="product-edit-modal__close" aria-label="Fechar">×</button></div><div class="product-edit-modal__body"></div></div>`;
+    modal.querySelector('.product-edit-modal__body').appendChild(form);
+    editorCard?.remove();
+    const closeModal = ()=>{ crudEdit=null; render(); };
+    modal.querySelector('.product-edit-modal__close').addEventListener('click', closeModal);
+    modal.addEventListener('click', event=>{ if(event.target===modal) closeModal(); });
+    document.body.appendChild(modal);
+    setTimeout(()=>modal.querySelector('[name=nome]')?.focus(), 0);
+  }
+
   renderTable(def, wrap.querySelector(`#table-${def.key}`));
   if(def.searchableTable){
     const search=wrap.querySelector(`#search-${def.key}`);
@@ -1082,7 +1108,11 @@ function wireCrudButtons(def, container, rows){
         const reason = def.canDelete(rows[idx]);
         if(reason){ alert(reason); return; }
       }
-      if(confirm('Excluir este registro?')){
+      const isProduct = def.key==='brutos' || def.key==='fracionados';
+      const confirmation = isProduct
+        ? 'Remover este produto do cadastro? O histórico de movimentações será preservado.'
+        : 'Excluir este registro?';
+      if(confirm(confirmation)){
         if(crudEdit && crudEdit.key===def.key && crudEdit.idx===idx) crudEdit = null;
         rows.splice(idx,1);
         saveDB(); render();
@@ -1752,12 +1782,16 @@ async function renderUsuarios(){
 /* ============================= ALERTAS ============================= */
 let screenSearch = {};
 let screenCategoryFilter = {};
+let screenProductTypeFilter = {};
 function screenSearchTool(key, placeholder){
   const hasCategoryFilter = key === 'estoqueCentral' || key === 'estoqueFracionados';
   const categoryFilter = hasCategoryFilter
     ? `<select id="screen-category-${key}" aria-label="Filtrar por categoria"><option value="">Todas as categorias</option>${categoriaOptions().map(cat=>`<option value="${escapeHtml(cat)}">${escapeHtml(cat)}</option>`).join('')}</select>`
     : '';
-  return `<div class="tabletools"><input id="screen-search-${key}" type="search" placeholder="${placeholder}" autocomplete="off">${categoryFilter}<span class="hint">A busca ignora acentos.</span></div>`;
+  const productTypeFilter = key === 'estoqueCentral'
+    ? `<select id="screen-product-type-${key}" aria-label="Filtrar por tipo de produto"><option value="">Todos os tipos</option><option value="Bruto">Bruto</option><option value="Fracionado">Fracionado</option></select>`
+    : '';
+  return `<div class="tabletools"><input id="screen-search-${key}" type="search" placeholder="${placeholder}" autocomplete="off">${productTypeFilter}${categoryFilter}<span class="hint">A busca ignora acentos.</span></div>`;
 }
 function wireScreenSearch(container, key){
   const input = container.querySelector(`#screen-search-${key}`);
@@ -3109,24 +3143,29 @@ initLock();
   function renderPagedStock(key,title,subtitle,heading,items,saldo,showProductType=false,defaultProductType='Bruto'){
     const c=document.getElementById('content');
     const all=[...items()].sort((a,b)=>compareText(a.nome,b.nome));
+    const typeOfProduct=item=>item.tipoEstoque||item.tipoProduto||defaultProductType;
     let query=screenSearch[key]||'';
     // O filtro de categoria deve iniciar em "Todas" a cada entrada nesta aba.
     delete screenCategoryFilter[key];
+    delete screenProductTypeFilter[key];
     let category='';
-    let saldoOrder='asc';
+    let productType='';
+    let saldoOrder='';
     let limit=window.innerWidth<=600?60:100;
     function draw(){
       const q=searchText(query);
-      const filtered=all.filter(item=>(!q||searchText(item.nome).includes(q))&&(!category||item.categoria===category));
-      if(key==='estoqueCentral'||key==='estoqueFracionados'){
+      const filtered=all.filter(item=>(!q||searchText(item.nome).includes(q))&&(!category||item.categoria===category)&&(!productType||(item.tipoEstoque||item.tipoProduto||defaultProductType)===productType));
+      if(saldoOrder && (key==='estoqueCentral'||key==='estoqueFracionados')){
         filtered.sort((a,b)=>{
           const difference=Number(saldo(a))-Number(saldo(b));
           return difference ? (saldoOrder==='asc'?difference:-difference) : compareText(a.nome,b.nome);
         });
       }
       const shown=filtered.slice(0,limit);
-      const saldoHeader=(key==='estoqueCentral'||key==='estoqueFracionados')?'<th>Saldo Atual <button type="button" class="stock-sort-button" id="sort-stock-saldo" title="Ordenar saldo '+(saldoOrder==='asc'?'decrescente':'crescente')+'" aria-label="Ordenar saldo '+(saldoOrder==='asc'?'decrescente':'crescente')+'">'+(saldoOrder==='asc'?'▲':'▼')+'</button></th>':'<th>Saldo Atual</th>';
-      c.innerHTML='<h1 class="pagetitle">'+title+'</h1><p class="pagesub">'+subtitle+'</p><div class="card"><h2>'+heading+'</h2>'+screenSearchTool(key,'Buscar produto')+'<p class="footnote" id="paged-stock-count"></p><table><thead><tr><th>Produto</th>'+(showProductType?'<th>Tipo de Produto</th>':'')+'<th>Categoria</th><th>Unidade</th>'+saldoHeader+'<th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>'+shown.map(item=>{const atual=saldo(item);return '<tr class="screen-search-row"><td><strong>'+escapeHtml(item.nome)+'</strong></td>'+(showProductType?'<td>'+escapeHtml(item.tipoProduto||defaultProductType)+'</td>':'')+'<td>'+escapeHtml(item.categoria||'—')+'</td><td>'+escapeHtml(item.unidade||'—')+'</td><td>'+fmtNum(atual)+'</td><td>'+fmtNum(item.estoqueMinimo)+'</td><td>'+statusBadge(atual,item.estoqueMinimo)+'</td></tr>';}).join('')+'</tbody></table>'+(shown.length<filtered.length?'<button type="button" class="btn secondary" id="paged-more-'+key+'">Mostrar mais ('+(filtered.length-shown.length)+')</button>':'')+'</div>';
+      const nextSaldoOrder=saldoOrder==='asc'?'decrescente':'crescente';
+      const saldoIcon=saldoOrder==='asc'?'▲':saldoOrder==='desc'?'▼':'↕';
+      const saldoHeader=(key==='estoqueCentral'||key==='estoqueFracionados')?'<th>Saldo Atual <button type="button" class="stock-sort-button" id="sort-stock-saldo" title="Ordenar saldo '+nextSaldoOrder+'" aria-label="Ordenar saldo '+nextSaldoOrder+'">'+saldoIcon+'</button></th>':'<th>Saldo Atual</th>';
+      c.innerHTML='<h1 class="pagetitle">'+title+'</h1><p class="pagesub">'+subtitle+'</p><div class="card"><h2>'+heading+'</h2>'+screenSearchTool(key,'Buscar produto')+'<p class="footnote" id="paged-stock-count"></p><table><thead><tr><th>Produto</th>'+(showProductType?'<th>Tipo de Produto</th>':'')+'<th>Categoria</th><th>Unidade</th>'+saldoHeader+'<th>Estoque Mínimo</th><th>Status</th></tr></thead><tbody>'+shown.map(item=>{const atual=saldo(item);return '<tr class="screen-search-row"><td><strong>'+escapeHtml(item.nome)+'</strong></td>'+(showProductType?'<td>'+escapeHtml(typeOfProduct(item))+'</td>':'')+'<td>'+escapeHtml(item.categoria||'—')+'</td><td>'+escapeHtml(item.unidade||'—')+'</td><td>'+fmtNum(atual)+'</td><td>'+fmtNum(item.estoqueMinimo)+'</td><td>'+statusBadge(atual,item.estoqueMinimo)+'</td></tr>';}).join('')+'</tbody></table>'+(shown.length<filtered.length?'<button type="button" class="btn secondary" id="paged-more-'+key+'">Mostrar mais ('+(filtered.length-shown.length)+')</button>':'')+'</div>';
       c.querySelector('#paged-stock-count').textContent='Mostrando '+shown.length+' de '+filtered.length+' produto(s).';
       const input=c.querySelector('#screen-search-'+key);input.value=query;
       const categoryInput=c.querySelector('#screen-category-'+key);
@@ -3134,6 +3173,15 @@ initLock();
         categoryInput.value=category;
         categoryInput.addEventListener('change',()=>{
           category=categoryInput.value;
+          limit=window.innerWidth<=600?60:100;
+          draw();
+        });
+      }
+      const productTypeInput=c.querySelector('#screen-product-type-'+key);
+      if(productTypeInput){
+        productTypeInput.value=productType;
+        productTypeInput.addEventListener('change',()=>{
+          productType=productTypeInput.value;
           limit=window.innerWidth<=600?60:100;
           draw();
         });
@@ -3152,13 +3200,19 @@ initLock();
         }
       });
       c.querySelector('#sort-stock-saldo')?.addEventListener('click',()=>{
-        saldoOrder=saldoOrder==='asc'?'desc':'asc';
+        saldoOrder=saldoOrder==='asc'?'desc':saldoOrder==='desc'?'':'asc';
         draw();
       });
       c.querySelector('#paged-more-'+key)?.addEventListener('click',()=>{limit+=window.innerWidth<=600?60:100;draw();});
     }
     draw();
   }
-  renderEstoqueCentral=function(){renderPagedStock('estoqueCentral','Estoque Central','Saldo dos produtos brutos na Central de Distribuição, calculado automaticamente.','Produtos Brutos — Saldo na Central de Distribuição',()=>db.brutos,item=>saldoCentral(item.nome),true);};
+  renderEstoqueCentral=function(){
+    const produtos=()=>[
+      ...db.brutos.map(item=>({...item,tipoEstoque:'Bruto',saldoEstoqueCentral:saldoCentral(item.nome)})),
+      ...db.fracionados.map(item=>({...item,tipoEstoque:'Fracionado',saldoEstoqueCentral:saldoCozinhaFracionado(item.nome)}))
+    ];
+    renderPagedStock('estoqueCentral','Estoque Central','Saldo dos produtos brutos e fracionados, calculado automaticamente.','Produtos — Saldo na Central de Distribuição',produtos,item=>item.saldoEstoqueCentral,true);
+  };
   renderEstoqueFracionados=function(){renderPagedStock('estoqueFracionados','Estoque Fracionados','Saldo dos produtos preparados e fracionados, calculado automaticamente.','Produtos Fracionados — Saldo produzido',()=>db.fracionados,item=>saldoCozinhaFracionado(item.nome),true,'Fracionado');};
 })();

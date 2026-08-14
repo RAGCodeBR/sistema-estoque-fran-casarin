@@ -51,7 +51,7 @@ declare global {
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 // Alterar este sufixo quando uma correção crítica for feita no script legado.
 // Assim navegadores que ainda tinham o JavaScript antigo carregam a versão nova.
-const assetVersion = `${process.env.NEXT_PUBLIC_APP_VERSION ?? "local"}-produto-fracionado-pesquisa-7`;
+const assetVersion = `${process.env.NEXT_PUBLIC_APP_VERSION ?? "local"}-ordem-alfabetica-estoque-central-1`;
 const defaultEmail = "";
 
 function authErrorMessage(error: unknown) {

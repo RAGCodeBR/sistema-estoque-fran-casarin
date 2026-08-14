@@ -297,7 +297,7 @@
       "nome": "Filé de Tilápia",
       "categoria": "Peixes e Frutos do Mar",
       "unidade": "KG",
-      "estoqueMinimo": 10.0,
+      "estoqueMinimo": 5.0,
       "fornecedor": "",
       "precoMedio": 0,
       "validadeDias": 0
@@ -2104,5 +2104,270 @@
     }
   ],
   "saidasFracionado": [],
-  "pedidosFeitos": {}
+  "pedidosFeitos": {},
+  "ajustesEstoque": [
+    {
+      "data": "2026-07-16",
+      "produto": "Coxa e Sobrecoxa com Osso",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 3.3,
+      "diferenca": 3.3,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Coxa e Sobrecoxa Desossada",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 27.6,
+      "diferenca": 27.6,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Ervilha Congelada",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 0.0,
+      "diferenca": 0.0,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Espeto de Carne",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 282.0,
+      "diferenca": 282.0,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Espeto de Frango",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 138.0,
+      "diferenca": 138.0,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Filezinho Suíno Temperado",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 0.0,
+      "diferenca": 0.0,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Filé de Peito de Frango Buffet",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 53.0,
+      "diferenca": 53.0,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Filé de Pintado",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 20.75,
+      "diferenca": 20.75,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Filé de Tilápia",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 52.0,
+      "diferenca": 52.0,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Filé em Cubos Buffet",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 6.65,
+      "diferenca": 6.65,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Filé Medalhão Buffet",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 786.0,
+      "diferenca": 786.0,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Filé Roll Buffet",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 29.37,
+      "diferenca": 29.37,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Filé Strogonoff Buffet",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 32.8,
+      "diferenca": 32.8,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Fraldinha Buffet",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 159.9,
+      "diferenca": 159.9,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Frango Kiev",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 230.0,
+      "diferenca": 230.0,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Frango Recheio",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 4.8,
+      "diferenca": 4.8,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Frutas Vermelhas",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 18.6,
+      "diferenca": 18.6,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Hambúrguer Gourmet 240g",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 50.0,
+      "diferenca": 50.0,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Joelho de Porco Buffet",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 4.5,
+      "diferenca": 4.5,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    }
+  ],
+  "ajustesFracionados": [
+    {
+      "data": "2026-07-16",
+      "produto": "Croqueta de Costela Desfiada",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 3.0,
+      "diferenca": 3.0,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Filé de Frango Adulto 150 G",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 6.0,
+      "diferenca": 6.0,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Filé de Frango Kids 100g",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 39.0,
+      "diferenca": 39.0,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Filé em Cubos Restaurante 100 G",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 127.0,
+      "diferenca": 127.0,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Filé Kids Restaurante 100g",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 138.0,
+      "diferenca": 138.0,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Filé Strogonoff Restaurante 100g",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 157.0,
+      "diferenca": 157.0,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Filé À Parmegiana Restaurante 400g",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 51.0,
+      "diferenca": 51.0,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Isca de Filé Restaurante 500g",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 26.0,
+      "diferenca": 26.0,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Isca de Frango Restaurante 350g",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 15.0,
+      "diferenca": 15.0,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    },
+    {
+      "data": "2026-07-16",
+      "produto": "Isca de Tilápia Restaurante 350g",
+      "saldoAnterior": 0.0,
+      "novoSaldo": 24.0,
+      "diferenca": 24.0,
+      "motivo": "Ajuste de estoque conforme contagem atual",
+      "responsavel": "Fran Casarin"
+    }
+  ]
 }
