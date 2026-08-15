@@ -27,6 +27,7 @@ declare global {
       updateProductType: (nome: string, tipo: "Bruto" | "Fracionado") => Promise<void>;
       updateFractionedProductType: (nome: string, tipo: "Bruto" | "Fracionado") => Promise<void>;
       convertProductType: (origem: "bruto" | "fracionado", nome: string, tipo: "Bruto" | "Fracionado") => Promise<void>;
+      archiveCategory: (nome: string) => Promise<void>;
     };
     __estoqueLegacy?: {
       getDB: () => unknown;

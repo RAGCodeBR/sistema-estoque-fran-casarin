@@ -211,7 +211,9 @@ function fracionadoCanDelete(row){
   ]);
 }
 function captureCurrentDraft(){
-  const form=document.querySelector(`#form-${currentTab}`);
+  const form=currentTab==='ajustesEstoque'
+    ? document.querySelector('#form-ajuste-unificado')
+    : document.querySelector(`#form-${currentTab}`);
   if(!form) return null;
   const values={};
   form.querySelectorAll('[name]').forEach(el=>values[el.name]=el.value);
@@ -219,12 +221,30 @@ function captureCurrentDraft(){
 }
 function restoreCurrentDraft(draft){
   if(!draft || draft.tab!==currentTab) return;
-  const form=document.querySelector(`#form-${currentTab}`);
+  const form=currentTab==='ajustesEstoque'
+    ? document.querySelector('#form-ajuste-unificado')
+    : document.querySelector(`#form-${currentTab}`);
   if(!form) return;
+  // O seletor de tipo do ajuste habilita o campo Produto e, por seguranca,
+  // limpa a selecao anterior. Restaure-o primeiro e depois recoloque o
+  // produto e os demais campos sem disparar uma nova limpeza.
+  if(currentTab==='ajustesEstoque'){
+    const tipo=form.querySelector('[name="tipo"]');
+    if(tipo && draft.values.tipo!=null){
+      tipo.value=draft.values.tipo;
+      tipo.dispatchEvent(new Event('change',{bubbles:true}));
+    }
+    ['produto','data','novoSaldo','motivo','responsavel'].forEach(name=>{
+      const el=form.querySelector(`[name="${name}"]`);
+      if(el && draft.values[name]!=null) el.value=draft.values[name];
+    });
+    form.querySelector('[name="produto"]')?.dispatchEvent(new Event('input',{bubbles:true}));
+  } else {
   Object.entries(draft.values).forEach(([name,value])=>{
     const el=form.querySelector(`[name="${name}"]`);
     if(el){ el.value=value; el.dispatchEvent(new Event('change',{bubbles:true})); }
   });
+  }
   const focused=draft.focusedName && form.querySelector(`[name="${draft.focusedName}"]`);
   if(focused) focused.focus();
 }
@@ -1094,7 +1114,7 @@ function wireCrudButtons(def, container, rows){
     });
   }
   container.querySelectorAll('.editbtn').forEach(b=>{
-    b.addEventListener('click', ()=>{
+    b.addEventListener('click', async ()=>{
       crudEdit = { key: def.key, idx: parseInt(b.dataset.idx) };
       render();
       const cardTitle = document.querySelector('#content .card h2');
@@ -1102,7 +1122,7 @@ function wireCrudButtons(def, container, rows){
     });
   });
   container.querySelectorAll('.delbtn').forEach(b=>{
-    b.addEventListener('click', ()=>{
+    b.addEventListener('click', async ()=>{
       const idx = parseInt(b.dataset.idx);
       if(def.canDelete){
         const reason = def.canDelete(rows[idx]);
@@ -1113,6 +1133,18 @@ function wireCrudButtons(def, container, rows){
         ? 'Remover este produto do cadastro? O histórico de movimentações será preservado.'
         : 'Excluir este registro?';
       if(confirm(confirmation)){
+        if(def.key==='categorias'){
+          const category=rows[idx];
+          try{
+            if(!window.__estoqueCloudSync || typeof window.__estoqueCloudSync.archiveCategory!=='function') throw new Error('A sincronização ainda não está pronta. Atualize a página e tente novamente.');
+            b.disabled=true;
+            await window.__estoqueCloudSync.archiveCategory(category.nome);
+          }catch(error){
+            b.disabled=false;
+            alert(error && error.message ? `Não foi possível excluir a categoria: ${error.message}` : 'Não foi possível excluir a categoria.');
+          }
+          return;
+        }
         if(crudEdit && crudEdit.key===def.key && crudEdit.idx===idx) crudEdit = null;
         rows.splice(idx,1);
         saveDB(); render();

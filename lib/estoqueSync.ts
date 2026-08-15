@@ -277,7 +277,7 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
 
   return {
     ...emptyDB(),
-    categorias: categorias.map((c) => ({ nome: c.nome })),
+    categorias: categorias.filter((c) => c.ativo !== false).map((c) => ({ nome: c.nome })),
     locais: locais.map((l) => ({ nome: l.nome, tipo: l.tipo, responsavel: l.responsavel ?? "" })),
     brutos: brutos.filter((p) => p.ativo !== false).map((p) => ({
       nome: p.nome,
@@ -1003,6 +1003,16 @@ export function installCloudSync(
         if (product) product.tipoProduto = tipo;
         lastSavedDB = cloneDB(current);
       }
+      window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
+    },
+    async archiveCategory(nome: string) {
+      const { error } = await supabase.rpc("arquivar_categoria", { p_nome: nome });
+      if (error) throw error;
+      const { db: freshDB, revision } = await loadConsistentLegacyState(supabase);
+      window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(freshDB));
+      lastSavedDB = cloneDB(freshDB);
+      stockRevision = revision;
+      window.__estoqueLegacy?.replaceDB(freshDB);
       window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
     },
     async updateFractionedProductType(nome: string, tipo: "Bruto" | "Fracionado") {
