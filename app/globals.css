@@ -196,6 +196,7 @@
 @media(max-width:760px){.product-edit-modal{padding:12px}.product-edit-modal__header,.product-edit-modal__body{padding-left:16px;padding-right:16px}.product-edit-modal__body form.entryform{grid-template-columns:repeat(2,minmax(0,1fr))}.product-edit-modal__body .field:last-child{grid-column:span 2}.product-edit-modal__body .field:last-child .btn{flex:1;}}
 @media(max-width:460px){.product-edit-modal__body form.entryform{grid-template-columns:1fr}.product-edit-modal__body .field:last-child{grid-column:span 1}.product-edit-modal__header h2{font-size:16px;}}
 .edit-ajuste,.del-ajuste{background:none;border:none;padding:0;color:#aaa;cursor:pointer;font-size:15px;font-weight:700;line-height:1;}
+.ajuste-saldo-hint{grid-column:1 / -1;margin-top:2px;}
 .card.ajuste-entry-card{min-height:240px;overflow-x:visible;overflow-y:visible;}
 .card.form-search-overlay-card{min-height:240px;overflow-x:visible;overflow-y:visible;}
 .edit-ajuste{margin-right:12px;}
