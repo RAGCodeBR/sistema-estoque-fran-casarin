@@ -263,7 +263,12 @@ function saveDB(){
     if(storageAvailable){ storageAvailable = false; showStorageWarning(); }
   }
   if(window.__estoqueCloudSync && typeof window.__estoqueCloudSync.save === 'function'){
-    window.__estoqueCloudSync.save(db, { immediate: currentTab==='saidasCentral' || currentTab==='saidasFracionado' });
+    // Uma gravação assíncrona não pode receber a referência mutável de `db`.
+    // Principalmente nas saídas, outro render ou lançamento poderia alterar o
+    // objeto antes do início da sincronização. Enviamos exatamente a fotografia
+    // criada no momento em que o usuário confirmou o formulário.
+    const snapshot = JSON.parse(JSON.stringify(db));
+    window.__estoqueCloudSync.save(snapshot, { immediate: currentTab==='saidasCentral' || currentTab==='saidasFracionado' });
   }
   return true;
 }
@@ -294,7 +299,22 @@ function showStorageWarning(){
   document.body.insertBefore(w, document.getElementById('layout'));
 }
 /* ============================= HELPERS DE CÁLCULO ============================= */
-function todayStr(){ return new Date().toISOString().slice(0,10); }
+function todayStr(){
+  // `toISOString()` usa UTC. No Brasil, durante parte da noite, isso pode
+  // devolver um dia diferente do que o usuário vê no calendário.
+  // Datas operacionais devem sempre respeitar o calendário local do aparelho.
+  const d = new Date();
+  const offset = d.getTimezoneOffset();
+  return new Date(d.getTime() - offset * 60000).toISOString().slice(0,10);
+}
+function isValidIsoDate(value){
+  const text=String(value||'');
+  const match=/^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if(!match) return false;
+  const year=Number(match[1]), month=Number(match[2]), day=Number(match[3]);
+  const date=new Date(Date.UTC(year,month-1,day));
+  return date.getUTCFullYear()===year && date.getUTCMonth()===month-1 && date.getUTCDate()===day;
+}
 function fmtDate(d){ if(!d) return "—"; const [y,m,dd]=d.split("-"); return `${dd}/${m}/${y}`; }
 function roundStock(n){ return Math.round((Number(n||0)+Number.EPSILON)*100)/100; }
 function exceedsStock(requested,available){ return roundStock(requested)>roundStock(available); }
@@ -679,7 +699,7 @@ const defEntradasCentral = {
 const defSaidasCentral = {
   key:'saidasCentral', title:'Saída da Central de Distribuição', subtitle:'Envio para Buffet, Sushi, Restaurante ou Cozinha de Fracionamento.', groupByDate:true, searchableTable:true, searchPlaceholder:'Buscar por produto, destino, documento ou data…',
   fields:[
-    {name:'data', label:'Data', type:'date', default:todayStr},
+    {name:'data', label:'Data', type:'date', default:todayStr, required:true},
     {name:'documento', label:'Nº Documento', type:'text'},
     {name:'produto', label:'Produto', type:'select', options:()=>nomesOrdenados(db.brutos), searchableOverlay:true},
     {name:'destino', label:'Local de Destino', type:'select', options:destinosCentralOptions},
@@ -709,6 +729,7 @@ const defSaidasCentral = {
     prodSel.addEventListener('input', update); prodSel.addEventListener('change', update); qtdInput.addEventListener('input', update); update();
   },
   validate:(row, editIdx)=>{
+    if(!isValidIsoDate(row.data)) return "Informe uma data de saída válida.";
     if(!row.produto || !db.brutos.some(b=>b.nome===row.produto)) return "Selecione um produto bruto da lista.";
     if(!row.destino) return "Selecione o destino.";
     if(!row.quantidade || row.quantidade<=0) return "Informe uma quantidade válida.";
@@ -781,7 +802,7 @@ const defProducoes = {
 const defSaidasFracionado = {
   key:'saidasFracionado', title:'Saída de Estoque Fracionado', subtitle:'Envio de fracionados da Cozinha para os setores consumidores.', groupByDate:true, searchableTable:true, searchPlaceholder:'Buscar por produto, destino, documento ou data…',
   fields:[
-    {name:'data', label:'Data', type:'date', default:todayStr},
+    {name:'data', label:'Data', type:'date', default:todayStr, required:true},
     {name:'documento', label:'Nº Documento', type:'text'},
     {name:'produto', label:'Produto Fracionado', type:'select', options:()=>nomesOrdenados(db.fracionados), searchableOverlay:true},
     {name:'destino', label:'Local de Destino', type:'select', options:destinosFracionadoOptions},
@@ -811,6 +832,7 @@ const defSaidasFracionado = {
     prodSel.addEventListener('input', update); prodSel.addEventListener('change', update); qtdInput.addEventListener('input', update); update();
   },
   validate:(row, editIdx)=>{
+    if(!isValidIsoDate(row.data)) return "Informe uma data de saída válida.";
     if(!row.produto || !db.fracionados.some(f=>f.nome===row.produto)) return "Selecione um produto fracionado da lista.";
     if(!row.destino) return "Selecione o destino.";
     if(!row.quantidade || row.quantidade<=0) return "Informe uma quantidade válida.";
@@ -1015,6 +1037,7 @@ function renderCrud(def){
     } else {
       input = document.createElement('input'); input.type = f.type; input.name = f.name;
       if(f.step) input.step = f.step;
+      if(f.required) input.required = true;
       if(editingRow) input.value = editingRow[f.name]!=null ? editingRow[f.name] : '';
       else if(f.default) input.value = f.default();
     }
