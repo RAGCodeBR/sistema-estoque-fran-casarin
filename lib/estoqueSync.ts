@@ -440,13 +440,13 @@ function atomicPayload(db: LegacyDB) {
   };
 }
 
-async function saveLegacyDBAtomically(
+async function restoreLegacyDBAtomically(
   supabase: SupabaseClient,
   db: LegacyDB,
   expectedRevision: number,
   scope: SyncScope,
 ): Promise<number> {
-  const { data, error } = await supabase.rpc("sincronizar_estoque_atomico", {
+  const { data, error } = await supabase.rpc("restaurar_backup_estoque_atomico", {
     p_dados: atomicPayload(db),
     p_revisao_esperada: expectedRevision,
     p_escopo: scope,
@@ -1190,7 +1190,7 @@ export function installCloudSync(
         assertSafeReplacement(currentDB, backupDB);
         assertValidMovements(backupDB);
         await createCheckpoint(supabase, user, currentDB);
-        stockRevision = await saveLegacyDBAtomically(supabase, backupDB, revision, "full");
+        stockRevision = await restoreLegacyDBAtomically(supabase, backupDB, revision, "full");
         const freshDB = await refreshLocalState();
         try { await insertSystemLog(supabase, user, currentDB, freshDB); } catch (error) { console.warn("Nao foi possivel registrar o log do backup.", error); }
         window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
