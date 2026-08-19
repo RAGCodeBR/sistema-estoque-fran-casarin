@@ -163,6 +163,7 @@ function nameKey(value){
   return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleUpperCase('pt-BR').replace(/\s+/g,' ').trim();
 }
 function sameName(a,b){ return nameKey(a)===nameKey(b); }
+function cleanCatalogName(value){ return String(value||'').replace(/\s+/g,' ').trim(); }
 function replaceExactName(value, oldName, newName){ return value===oldName ? newName : value; }
 function renameBrutoReferences(oldName,newName){
   if(!oldName || oldName===newName) return;
@@ -605,7 +606,11 @@ const defLocais = {
     {label:'Tipo', render:r=>r.tipo},
     {label:'Responsável', render:r=>r.responsavel||"—"},
   ],
-  validate:(row)=>{ if(!row.nome) return "Informe o nome do local."; return null; }
+  validate:(row, editIdx)=>{
+    if(!row.nome) return "Informe o nome do local.";
+    if(db.locais.some((l,i)=>i!==editIdx && sameName(l.nome,row.nome))) return "Já existe um local com esse nome.";
+    return null;
+  }
 };
 
 const defCategorias = {
@@ -620,7 +625,7 @@ const defCategorias = {
   ],
   validate:(row, editIdx)=>{
     if(!row.nome) return "Informe o nome da categoria.";
-    if(db.categorias.some((c,i)=>i!==editIdx && c.nome.toLowerCase()===row.nome.toLowerCase())) return "Já existe uma categoria com esse nome.";
+    if(db.categorias.some((c,i)=>i!==editIdx && sameName(c.nome,row.nome))) return "Já existe uma categoria com esse nome.";
     return null;
   },
   beforeSave:(row,editIdx)=>{
@@ -1071,6 +1076,9 @@ function renderCrud(def){
       const el = form.querySelector(`[name=${f.name}]`);
       row[f.name] = f.type==='number' ? parseFloat(el.value||0) : el.value;
     });
+    if((def.key==='categorias' || def.key==='locais') && Object.prototype.hasOwnProperty.call(row,'nome')){
+      row.nome=cleanCatalogName(row.nome);
+    }
     // Ao editar, manter o mesmo nome do registro não deve ser tratado como
     // duplicidade. Isso também permite corrigir cadastros antigos que já
     // possuam nomes equivalentes no banco (inclusive com acentos diferentes).
@@ -1113,7 +1121,11 @@ function renderCrud(def){
       }catch(error){
         const submitButton=form.querySelector('button[type=submit]');
         if(submitButton) submitButton.disabled=false;
-        alert(error && error.message ? `Não foi possível salvar: ${error.message}` : 'Não foi possível salvar a alteração.');
+        const message=error && error.message ? String(error.message) : '';
+        const duplicate=/duplicate key value|nome_(ativo_)?normalizado|categorias_nome_key|locais_nome_key/i.test(message);
+        alert(duplicate
+          ? `Não foi possível salvar: já existe ${def.key==='categorias'?'uma categoria':'um local'} com esse nome.`
+          : (message ? `Não foi possível salvar: ${message}` : 'Não foi possível salvar a alteração.'));
       }
       return;
     }
