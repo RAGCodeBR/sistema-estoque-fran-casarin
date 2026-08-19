@@ -1102,8 +1102,29 @@ function renderCrud(def){
       }
       return;
     }
+    if(editing!=null && (def.key==='categorias' || def.key==='locais')){
+      try{
+        if(!window.__estoqueCloudSync || typeof window.__estoqueCloudSync.updateCatalog!=='function') throw new Error('A sincronização ainda não está pronta. Atualize a página e tente novamente.');
+        const submitButton=form.querySelector('button[type=submit]');
+        if(submitButton) submitButton.disabled=true;
+        await window.__estoqueCloudSync.updateCatalog(def.key, editingRow, row);
+        crudEdit=null;
+        render();
+      }catch(error){
+        const submitButton=form.querySelector('button[type=submit]');
+        if(submitButton) submitButton.disabled=false;
+        alert(error && error.message ? `Não foi possível salvar: ${error.message}` : 'Não foi possível salvar a alteração.');
+      }
+      return;
+    }
     if(def.beforeSave) def.beforeSave(row, editing);
-    if(editing!=null){ db[def.key][editing] = row; }
+    if(editing!=null){
+      // IDs e versão pertencem à sincronização e nunca aparecem no formulário.
+      // Mantê-los faz a edição atingir exatamente a linha selecionada no banco.
+      if(editingRow && editingRow._id) row._id=editingRow._id;
+      if(editingRow && editingRow._updatedAt) row._updatedAt=editingRow._updatedAt;
+      db[def.key][editing] = row;
+    }
     else { db[def.key].push(row); }
     crudEdit = null;
     saveDB();
@@ -2374,7 +2395,7 @@ function exportBackup(){
 }
 function importBackupFile(file){
   const reader = new FileReader();
-  reader.onload = (e)=>{
+  reader.onload = async (e)=>{
     let parsed;
     try{ parsed = JSON.parse(e.target.result); }
     catch(err){ alert('Não foi possível ler o arquivo. Verifique se é um backup válido (.json) gerado por este sistema.'); return; }
@@ -2382,11 +2403,15 @@ function importBackupFile(file){
     const missing = requiredKeys.filter(k=>!Array.isArray(parsed[k]));
     if(missing.length){ alert('Arquivo inválido: faltam os dados de ' + missing.join(', ') + '.'); return; }
     if(!confirm('Isso vai substituir TODOS os dados atuais pelos dados deste backup. Essa ação não pode ser desfeita. Continuar?')) return;
-    db = normalizeDB(parsed);
-    saveDB();
-    currentTab = 'backup';
-    render();
-    alert('Backup importado com sucesso!');
+    try{
+      if(!window.__estoqueCloudSync || typeof window.__estoqueCloudSync.restoreBackup!=='function') throw new Error('A sincronização ainda não está pronta. Atualize a página e tente novamente.');
+      await window.__estoqueCloudSync.restoreBackup(normalizeDB(parsed));
+      currentTab = 'backup';
+      render();
+      alert('Backup importado e confirmado no banco com sucesso!');
+    }catch(error){
+      alert(error && error.message ? `O backup não foi importado: ${error.message}` : 'O backup não foi importado. Nenhum sucesso foi confirmado.');
+    }
   };
   reader.onerror = ()=> alert('Erro ao ler o arquivo selecionado.');
   reader.readAsText(file);

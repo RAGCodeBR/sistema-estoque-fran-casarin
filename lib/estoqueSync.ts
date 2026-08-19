@@ -60,6 +60,10 @@ const clean = (value: unknown) => {
   const text = String(value ?? "").trim();
   return text.length > 0 ? text : null;
 };
+const rowMeta = (row: Record<string, any>) => ({
+  _id: row.id,
+  _updatedAt: row.atualizado_em,
+});
 
 const movementKeys: Array<keyof Pick<LegacyDB, "entradasCentral" | "saidasCentral" | "producoes" | "saidasFracionado" | "ajustesEstoque" | "ajustesFracionados" | "pedidosCompra">> = [
   "entradasCentral",
@@ -277,9 +281,10 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
 
   return {
     ...emptyDB(),
-    categorias: categorias.filter((c) => c.ativo !== false).map((c) => ({ nome: c.nome })),
-    locais: locais.map((l) => ({ nome: l.nome, tipo: l.tipo, responsavel: l.responsavel ?? "" })),
+    categorias: categorias.filter((c) => c.ativo !== false).map((c) => ({ ...rowMeta(c), nome: c.nome })),
+    locais: locais.map((l) => ({ ...rowMeta(l), nome: l.nome, tipo: l.tipo, responsavel: l.responsavel ?? "" })),
     brutos: brutos.filter((p) => p.ativo !== false).map((p) => ({
+      ...rowMeta(p),
       nome: p.nome,
       categoria: categoriaPorId.get(p.categoria_id)?.nome ?? "Outros",
       tipoProduto: p.tipo_produto ?? "Bruto",
@@ -290,6 +295,7 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
       validadeDias: num(p.validade_dias),
     })),
     fracionados: fracionados.filter((p) => p.ativo !== false).map((p) => ({
+      ...rowMeta(p),
       nome: p.nome,
       categoria: categoriaPorId.get(p.categoria_id)?.nome ?? "Outros",
       tipoProduto: p.tipo_produto ?? "Fracionado",
@@ -302,6 +308,7 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
       validadeDias: num(p.validade_dias),
     })),
     entradasCentral: entradas.map((e) => ({
+      ...rowMeta(e),
       data: e.data,
       nf: e.nf ?? "",
       produto: brutoPorId.get(e.produto_bruto_id)?.nome ?? "",
@@ -311,6 +318,7 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
       validade: e.validade ?? "",
     })),
     saidasCentral: saidas.map((s) => ({
+      ...rowMeta(s),
       data: s.data,
       documento: s.documento ?? "",
       produto: brutoPorId.get(s.produto_bruto_id)?.nome ?? "",
@@ -318,6 +326,7 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
       quantidade: num(s.quantidade),
     })),
     producoes: producoes.map((p) => ({
+      ...rowMeta(p),
       data: p.data,
       produtoBruto: brutoPorId.get(p.produto_bruto_id)?.nome ?? "",
       quantidadeUtilizada: num(p.quantidade_utilizada),
@@ -325,6 +334,7 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
       quantidadeProduzida: num(p.quantidade_produzida),
     })),
     saidasFracionado: saidasFracionado.map((s) => ({
+      ...rowMeta(s),
       data: s.data,
       documento: s.documento ?? "",
       produto: fracionadoPorId.get(s.produto_fracionado_id)?.nome ?? "",
@@ -332,6 +342,7 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
       quantidade: num(s.quantidade),
     })),
     ajustesEstoque: [...ajustes].sort((a, b) => Number(a.ordem ?? 0) - Number(b.ordem ?? 0)).map((a) => ({
+      ...rowMeta(a),
       data: a.data,
       produto: brutoPorId.get(a.produto_bruto_id)?.nome ?? "",
       saldoAnterior: num(a.saldo_anterior),
@@ -342,6 +353,7 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
       ordem: Number(a.ordem ?? 0),
     })),
     ajustesFracionados: [...ajustesFracionados].sort((a, b) => Number(a.ordem ?? 0) - Number(b.ordem ?? 0)).map((a) => ({
+      ...rowMeta(a),
       data: a.data,
       produto: fracionadoPorId.get(a.produto_fracionado_id)?.nome ?? "",
       saldoAnterior: num(a.saldo_anterior),
@@ -352,6 +364,7 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
       ordem: Number(a.ordem ?? 0),
     })),
     pedidosCompra: pedidos.map((p) => ({
+      ...rowMeta(p),
       data: p.data,
       produto: brutoPorId.get(p.produto_bruto_id)?.nome ?? "",
       fornecedor: p.fornecedor ?? "",
@@ -879,7 +892,7 @@ function stableKey(item: Record<string, any>, index: number, fields: string[]) {
 }
 
 function changedFields(before: Record<string, any>, after: Record<string, any>) {
-  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)].filter((key) => !key.startsWith("_")));
   return [...keys].filter((key) => JSON.stringify(before[key] ?? "") !== JSON.stringify(after[key] ?? ""));
 }
 
@@ -958,6 +971,78 @@ async function insertSystemLog(supabase: SupabaseClient, user: User, before: Leg
   if (error) throw error;
 }
 
+type IncrementalAction = "inserir" | "alterar" | "excluir";
+type IncrementalOperation = {
+  secao: ArraySection | "itensManuaisCompra";
+  acao: IncrementalAction;
+  id?: string;
+  atualizadoEm?: string;
+  dados: Record<string, any>;
+};
+
+const incrementalSections: ArraySection[] = [
+  "categorias", "locais", "brutos", "fracionados", "entradasCentral", "saidasCentral",
+  "producoes", "saidasFracionado", "ajustesEstoque", "ajustesFracionados", "pedidosCompra",
+];
+
+function rowData(row: Record<string, any>) {
+  return Object.fromEntries(Object.entries(row).filter(([key]) => !key.startsWith("_")));
+}
+
+function buildIncrementalOperations(before: LegacyDB, after: LegacyDB, scope: SyncScope): IncrementalOperation[] {
+  const allowed = scope === "controle_fracionados_ampliado"
+    ? new Set<ArraySection>(["fracionados", "saidasCentral", "producoes", "saidasFracionado", "ajustesFracionados"])
+    : new Set(incrementalSections);
+  const operations: IncrementalOperation[] = [];
+
+  for (const section of incrementalSections) {
+    if (!allowed.has(section)) continue;
+    const beforeRows = before[section] as Array<Record<string, any>>;
+    const afterRows = after[section] as Array<Record<string, any>>;
+    const beforeById = new Map(beforeRows.filter((row) => row._id).map((row) => [String(row._id), row]));
+    const afterById = new Map(afterRows.filter((row) => row._id).map((row) => [String(row._id), row]));
+
+    for (const [id, previous] of beforeById) {
+      const current = afterById.get(id);
+      if (!current) {
+        operations.push({ secao: section, acao: "excluir", id, atualizadoEm: previous._updatedAt, dados: rowData(previous) });
+      } else if (JSON.stringify(rowData(previous)) !== JSON.stringify(rowData(current))) {
+        operations.push({ secao: section, acao: "alterar", id, atualizadoEm: previous._updatedAt, dados: rowData(current) });
+      }
+    }
+    for (const current of afterRows) {
+      if (!current._id) {
+        const data = rowData(current);
+        // A ordem do ajuste vem do banco, não do relógio do celular. Assim o
+        // último ajuste confirmado sempre será o saldo vigente.
+        if (section === "ajustesEstoque" || section === "ajustesFracionados") data.ordem = 0;
+        operations.push({ secao: section, acao: "inserir", dados: data });
+      }
+    }
+  }
+
+  if (scope === "full") {
+    const beforeManual = new Set(before.itensManuaisCompra ?? []);
+    const afterManual = new Set(after.itensManuaisCompra ?? []);
+    afterManual.forEach((nome) => {
+      if (!beforeManual.has(nome)) operations.push({ secao: "itensManuaisCompra", acao: "inserir", dados: { nome } });
+    });
+    beforeManual.forEach((nome) => {
+      if (!afterManual.has(nome)) operations.push({ secao: "itensManuaisCompra", acao: "excluir", dados: { nome } });
+    });
+  }
+  return operations;
+}
+
+async function applyIncrementalOperations(supabase: SupabaseClient, operations: IncrementalOperation[]) {
+  if (operations.length === 0) return;
+  if (operations.length > 50) {
+    throw new Error("Proteção ativada: esta ação tentou alterar mais de 50 registros. Nenhuma alteração foi enviada.");
+  }
+  const { error } = await supabase.rpc("aplicar_operacoes_estoque", { p_operacoes: operations });
+  if (error) throw error;
+}
+
 export function installCloudSync(
   supabase: SupabaseClient,
   user: User,
@@ -966,10 +1051,10 @@ export function installCloudSync(
   initialRevision = 0,
 ): RealtimeChannel {
   let saving = false;
-  let saveRevision = 0;
   let stockRevision = initialRevision;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let remoteTimer: ReturnType<typeof setTimeout> | undefined;
+  let saveChain: Promise<void> = Promise.resolve();
   let lastSavedDB: LegacyDB = (() => {
     try {
       return cloneDB(JSON.parse(window.localStorage?.getItem(STORAGE_KEY) || "null") || emptyDB());
@@ -977,6 +1062,15 @@ export function installCloudSync(
       return emptyDB();
     }
   })();
+
+  async function refreshLocalState() {
+    const { db: freshDB, revision } = await loadConsistentLegacyState(supabase);
+    window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(freshDB));
+    lastSavedDB = cloneDB(freshDB);
+    stockRevision = revision;
+    window.__estoqueLegacy?.replaceDB(freshDB);
+    return freshDB;
+  }
 
   (window as any).__estoqueCloudSync = {
     async convertProductType(origem: "bruto" | "fracionado", nome: string, tipo: "Bruto" | "Fracionado") {
@@ -1015,6 +1109,18 @@ export function installCloudSync(
       lastSavedDB = cloneDB(freshDB);
       stockRevision = revision;
       window.__estoqueLegacy?.replaceDB(freshDB);
+      window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
+    },
+    async updateCatalog(section: "categorias" | "locais", current: Record<string, any>, next: Record<string, any>) {
+      if (!current._id) throw new Error("O registro não possui identificador do banco. Recarregue a página.");
+      await applyIncrementalOperations(supabase, [{
+        secao: section,
+        acao: "alterar",
+        id: String(current._id),
+        atualizadoEm: current._updatedAt,
+        dados: rowData(next),
+      }]);
+      await refreshLocalState();
       window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
     },
     async updateProduct(tipo: "bruto" | "fracionado", nomeAtual: string, produto: Record<string, any>) {
@@ -1075,87 +1181,63 @@ export function installCloudSync(
       }
       window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
     },
+    async restoreBackup(backupDB: LegacyDB) {
+      if (scope !== "full") throw new Error("Somente Master ou Administrador pode restaurar um backup completo.");
+      saving = true;
+      window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvando" } }));
+      try {
+        const { db: currentDB, revision } = await loadConsistentLegacyState(supabase);
+        assertSafeReplacement(currentDB, backupDB);
+        assertValidMovements(backupDB);
+        await createCheckpoint(supabase, user, currentDB);
+        stockRevision = await saveLegacyDBAtomically(supabase, backupDB, revision, "full");
+        const freshDB = await refreshLocalState();
+        try { await insertSystemLog(supabase, user, currentDB, freshDB); } catch (error) { console.warn("Nao foi possivel registrar o log do backup.", error); }
+        window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
+      } finally {
+        saving = false;
+      }
+    },
     save(db: LegacyDB, options?: { immediate?: boolean }) {
       window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(db));
       clearTimeout(timer);
       window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvando" } }));
-      const revision = ++saveRevision;
-      timer = setTimeout(async () => {
+      const queuedDB = cloneDB(db);
+      timer = setTimeout(() => {
         timer = undefined;
-        saving = true;
-        let recoveryDB: LegacyDB | undefined;
-        try {
-          const nextDB = cloneDB(db);
-          const beforeDB = cloneDB(lastSavedDB);
-          let savedDB: LegacyDB | undefined;
-
-          // A revisão do banco continua sendo verificada dentro da função SQL.
-          // Se alguém gravar no intervalo entre a leitura e a escrita, lemos a
-          // versão nova e tentamos novamente, sem descartar a edição local.
-          for (let attempt = 0; attempt < 5; attempt += 1) {
-            const { db: remoteDB, revision: remoteRevision } = await loadConsistentLegacyState(supabase);
-            const mergedDB = mergeConcurrentChanges(beforeDB, nextDB, remoteDB, scope);
-            assertSafeReplacement(remoteDB, mergedDB);
-            assertValidMovements(mergedDB);
-            recoveryDB = remoteDB;
-            try {
-              stockRevision = await saveLegacyDBAtomically(supabase, mergedDB, remoteRevision, scope);
-              savedDB = mergedDB;
-              break;
-            } catch (saveError) {
-              const { message, code } = syncErrorInfo(saveError);
-              const normalizedMessage = message.toLowerCase();
-              const safeDeleteBlocked = code === "21000" && normalizedMessage.includes("delete requires a where clause");
-              if (safeDeleteBlocked) {
-                throw new Error(`O banco recusou uma exclusão interna de sincronização: ${message}. Nenhuma alteração foi salva.`);
-                // Alguns projetos Supabase ativam a proteção pg_safeupdate,
-                // que rejeita o DELETE interno da função SQL antiga. A rota
-                // abaixo usa somente deletes com filtro explícito e mantém o
-                // sistema operante até a função do banco ser atualizada.
-                throw new Error("A sincronizaÃ§Ã£o segura foi bloqueada pelo banco. Nenhuma alteraÃ§Ã£o foi salva; atualize a funÃ§Ã£o de sincronizaÃ§Ã£o antes de tentar novamente.");
-              }
-              const revisionConflict = code === "40001" || normalizedMessage.includes("outra sessao") || normalizedMessage.includes("outra sessão") || normalizedMessage.includes("revisao") || normalizedMessage.includes("revisão");
-              if (!revisionConflict || attempt === 4) throw saveError;
-              await wait(150 * (attempt + 1));
-            }
-          }
-          if (!savedDB) throw new Error("Não foi possível confirmar a gravação do estoque.");
+        saveChain = saveChain.then(async () => {
+          saving = true;
           try {
-            await insertSystemLog(supabase, user, beforeDB, nextDB);
-          } catch (logError) {
-            console.warn("Nao foi possivel registrar o log resumido.", logError);
-          }
-          const mergedRemoteChanges = stableSnapshot(savedDB) !== stableSnapshot(nextDB);
-          lastSavedDB = cloneDB(savedDB);
-          if (mergedRemoteChanges) {
-            window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(savedDB));
-            window.__estoqueLegacy?.replaceDB(savedDB);
-          }
-          window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
-        } catch (error) {
-          console.error("Erro ao salvar estoque no Supabase", error);
-          const errorInfo = syncErrorInfo(error);
-          let message = errorInfo.message || (error instanceof Error ? error.message : "Verifique permissao do usuario ou dados obrigatorios.");
-          if (errorInfo.code && errorInfo.code !== "40001") message = `${message} (código ${errorInfo.code})`;
-          if (recoveryDB) {
+            const nextDB = queuedDB;
+            const beforeDB = cloneDB(lastSavedDB);
+            assertValidMovements(nextDB);
+            const operations = buildIncrementalOperations(beforeDB, nextDB, scope);
+            await applyIncrementalOperations(supabase, operations);
             try {
-              lastSavedDB = cloneDB(recoveryDB);
-              window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(recoveryDB));
-              window.__estoqueLegacy?.replaceDB(recoveryDB);
+              await insertSystemLog(supabase, user, beforeDB, nextDB);
+            } catch (logError) {
+              console.warn("Nao foi possivel registrar o log resumido.", logError);
+            }
+            if (operations.length > 0) await refreshLocalState();
+            else lastSavedDB = cloneDB(nextDB);
+            window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
+          } catch (error) {
+            console.error("Erro ao salvar estoque no Supabase", error);
+            const errorInfo = syncErrorInfo(error);
+            let message = errorInfo.message || (error instanceof Error ? error.message : "Verifique permissao do usuario ou dados obrigatorios.");
+            if (errorInfo.code && errorInfo.code !== "40001") message = `${message} (código ${errorInfo.code})`;
+            try {
+              await refreshLocalState();
               message = `${message} A cópia local foi restaurada para a versão atual do banco.`;
             } catch (restoreError) {
               console.error("Erro ao restaurar a cópia local", restoreError);
               message = `${message} A gravação foi interrompida.`;
             }
+            window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "erro", message } }));
+          } finally {
+            saving = false;
           }
-          window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "erro", message } }));
-        } finally {
-          setTimeout(() => {
-            // A nova edição já possui um agendamento próprio. Não libere a
-            // janela de sincronização de uma gravação mais recente.
-            if (revision === saveRevision) saving = false;
-          }, 3000);
-        }
+        });
       }, options?.immediate ? 0 : 900);
     },
     isSaving() {
@@ -1179,13 +1261,10 @@ export function installCloudSync(
 
   return supabase
     .channel(channelName)
-    .on("postgres_changes", { event: "*", schema: "public" }, () => {
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "estoque_sync_state", filter: "singleton=eq.true" }, () => {
       if (saving) return;
       clearTimeout(remoteTimer);
-      // Uma alteração no legado ainda grava várias tabelas. Esperar a última
-      // notificação evita que outro usuário recarregue um banco parcialmente
-      // sincronizado — a principal causa da sugestão de pedidos parecer parada.
-      remoteTimer = setTimeout(onRemoteChange, 2200);
+      remoteTimer = setTimeout(onRemoteChange, 350);
     })
     .subscribe();
 }
