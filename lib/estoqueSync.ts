@@ -331,7 +331,7 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
       destino: localPorId.get(s.destino_local_id)?.nome ?? "",
       quantidade: num(s.quantidade),
     })),
-    ajustesEstoque: ajustes.map((a) => ({
+    ajustesEstoque: [...ajustes].sort((a, b) => Number(a.ordem ?? 0) - Number(b.ordem ?? 0)).map((a) => ({
       data: a.data,
       produto: brutoPorId.get(a.produto_bruto_id)?.nome ?? "",
       saldoAnterior: num(a.saldo_anterior),
@@ -339,8 +339,9 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
       diferenca: num(a.diferenca),
       motivo: a.motivo ?? "",
       responsavel: a.responsavel ?? "",
+      ordem: Number(a.ordem ?? 0),
     })),
-    ajustesFracionados: ajustesFracionados.map((a) => ({
+    ajustesFracionados: [...ajustesFracionados].sort((a, b) => Number(a.ordem ?? 0) - Number(b.ordem ?? 0)).map((a) => ({
       data: a.data,
       produto: fracionadoPorId.get(a.produto_fracionado_id)?.nome ?? "",
       saldoAnterior: num(a.saldo_anterior),
@@ -348,6 +349,7 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
       diferenca: num(a.diferenca),
       motivo: a.motivo ?? "",
       responsavel: a.responsavel ?? "",
+      ordem: Number(a.ordem ?? 0),
     })),
     pedidosCompra: pedidos.map((p) => ({
       data: p.data,
@@ -409,11 +411,11 @@ function atomicPayload(db: LegacyDB) {
     saidasFracionado: (db.saidasFracionado ?? []).map((x) => ({ data: x.data, documento: x.documento, produto: x.produto, destino: x.destino, quantidade: num(x.quantidade) })),
     ajustesEstoque: (db.ajustesEstoque ?? []).map((x) => ({
       data: x.data, produto: x.produto, saldo_anterior: num(x.saldoAnterior), novo_saldo: num(x.novoSaldo),
-      diferenca: num(x.diferenca), motivo: x.motivo, responsavel: x.responsavel,
+      diferenca: num(x.diferenca), motivo: x.motivo, responsavel: x.responsavel, ordem: num(x.ordem),
     })),
     ajustesFracionados: (db.ajustesFracionados ?? []).map((x) => ({
       data: x.data, produto: x.produto, saldo_anterior: num(x.saldoAnterior), novo_saldo: num(x.novoSaldo),
-      diferenca: num(x.diferenca), motivo: x.motivo, responsavel: x.responsavel,
+      diferenca: num(x.diferenca), motivo: x.motivo, responsavel: x.responsavel, ordem: num(x.ordem),
     })),
     pedidosCompra: (db.pedidosCompra ?? []).map((x) => ({
       data: x.data, produto: x.produto, fornecedor: x.fornecedor, quantidade_pedida: num(x.quantidadePedida),
@@ -1013,6 +1015,53 @@ export function installCloudSync(
       lastSavedDB = cloneDB(freshDB);
       stockRevision = revision;
       window.__estoqueLegacy?.replaceDB(freshDB);
+      window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
+    },
+    async updateProduct(tipo: "bruto" | "fracionado", nomeAtual: string, produto: Record<string, any>) {
+      const rpc = tipo === "bruto" ? "atualizar_produto_bruto" : "atualizar_produto_fracionado";
+      const params = tipo === "bruto"
+        ? {
+            p_nome_atual: nomeAtual, p_nome: produto.nome, p_categoria: produto.categoria,
+            p_tipo_produto: produto.tipoProduto ?? "Bruto", p_unidade: produto.unidade,
+            p_estoque_minimo: num(produto.estoqueMinimo), p_fornecedor: produto.fornecedor ?? "",
+            p_preco_medio: num(produto.precoMedio), p_validade_dias: num(produto.validadeDias),
+          }
+        : {
+            p_nome_atual: nomeAtual, p_nome: produto.nome, p_categoria: produto.categoria,
+            p_tipo_produto: produto.tipoProduto ?? "Fracionado", p_unidade: produto.unidade,
+            p_origem: produto.origem ?? "", p_rendimento: num(produto.rendimento),
+            p_estoque_minimo: num(produto.estoqueMinimo), p_fornecedor: produto.fornecedor ?? "",
+            p_preco_medio: num(produto.precoMedio), p_validade_dias: num(produto.validadeDias),
+      };
+      const { error } = await supabase.rpc(rpc, params);
+      if (error) throw error;
+      // A RPC já confirmou a alteração no banco. Recarregar todas as tabelas
+      // aqui deixava o modal aberto por vários segundos. Atualizamos somente
+      // o cadastro local e seus nomes de referência; os movimentos continuam
+      // no mesmo ID no banco e não têm saldo alterado por esta operação.
+      const current = window.__estoqueLegacy?.getDB() as LegacyDB | undefined;
+      if (current) {
+        const products = tipo === "bruto" ? current.brutos : current.fracionados;
+        const product = products?.find((item) => item.nome === nomeAtual);
+        if (product) Object.assign(product, produto);
+
+        if (nomeAtual !== produto.nome) {
+          if (tipo === "bruto") {
+            current.entradasCentral?.forEach((item) => { if (item.produto === nomeAtual) item.produto = produto.nome; });
+            current.saidasCentral?.forEach((item) => { if (item.produto === nomeAtual) item.produto = produto.nome; });
+            current.producoes?.forEach((item) => { if (item.produtoBruto === nomeAtual) item.produtoBruto = produto.nome; });
+            current.ajustesEstoque?.forEach((item) => { if (item.produto === nomeAtual) item.produto = produto.nome; });
+            current.pedidosCompra?.forEach((item) => { if (item.produto === nomeAtual) item.produto = produto.nome; });
+            current.itensManuaisCompra = current.itensManuaisCompra?.map((item) => item === nomeAtual ? produto.nome : item);
+          } else {
+            current.producoes?.forEach((item) => { if (item.produtoFracionado === nomeAtual) item.produtoFracionado = produto.nome; });
+            current.saidasFracionado?.forEach((item) => { if (item.produto === nomeAtual) item.produto = produto.nome; });
+            current.ajustesFracionados?.forEach((item) => { if (item.produto === nomeAtual) item.produto = produto.nome; });
+          }
+        }
+        window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(current));
+        lastSavedDB = cloneDB(current);
+      }
       window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
     },
     async updateFractionedProductType(nome: string, tipo: "Bruto" | "Fracionado") {

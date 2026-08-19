@@ -11,6 +11,7 @@ import {
   listAuditLogs,
   listPerfis,
   loadConsistentLegacyState,
+  loadStockRevision,
   resetPerfilPassword,
   STORAGE_KEY,
   updatePerfilUser,
@@ -28,6 +29,7 @@ declare global {
       updateFractionedProductType: (nome: string, tipo: "Bruto" | "Fracionado") => Promise<void>;
       convertProductType: (origem: "bruto" | "fracionado", nome: string, tipo: "Bruto" | "Fracionado") => Promise<void>;
       archiveCategory: (nome: string) => Promise<void>;
+      updateProduct: (tipo: "bruto" | "fracionado", nomeAtual: string, produto: Record<string, unknown>) => Promise<void>;
     };
     __estoqueLegacy?: {
       getDB: () => unknown;
@@ -52,7 +54,7 @@ declare global {
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 // Alterar este sufixo quando uma correção crítica for feita no script legado.
 // Assim navegadores que ainda tinham o JavaScript antigo carregam a versão nova.
-const assetVersion = `${process.env.NEXT_PUBLIC_APP_VERSION ?? "local"}-ajuste-saldo-layout-1`;
+const assetVersion = `${process.env.NEXT_PUBLIC_APP_VERSION ?? "local"}-desempenho-mobile-2`;
 const defaultEmail = "";
 
 function authErrorMessage(error: unknown) {
@@ -112,18 +114,34 @@ export default function LegacyStockSystem() {
     let refreshInterval: number | undefined;
     let refreshWhenVisible: (() => void) | undefined;
     let refreshingFromCloud = false;
+    let latestRemoteRevision = 0;
+
+    function hasActiveFormDraft() {
+      const active = document.activeElement;
+      return active instanceof HTMLInputElement || active instanceof HTMLSelectElement || active instanceof HTMLTextAreaElement
+        ? Boolean(active.closest("#content form"))
+        : false;
+    }
 
     async function refreshFromCloud(showUpdate = false) {
       if (cancelled || refreshingFromCloud || window.__estoqueCloudSync?.isSaving()) return;
       refreshingFromCloud = true;
       try {
+        // A consulta de revisão é leve. Só baixamos todas as tabelas quando
+        // houve mudança real no banco, evitando travamentos no celular.
+        const revision = await loadStockRevision(supabase);
+        if (revision === latestRemoteRevision || hasActiveFormDraft()) return;
         const { db: freshDB, revision: freshRevision } = await loadConsistentLegacyState(supabase);
         if (cancelled) return;
         const currentDB = window.__estoqueLegacy?.getDB();
-        if (currentDB && JSON.stringify(currentDB) === JSON.stringify(freshDB)) return;
+        if (currentDB && JSON.stringify(currentDB) === JSON.stringify(freshDB)) {
+          latestRemoteRevision = freshRevision;
+          return;
+        }
 
         window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(freshDB));
         window.__estoqueCloudSync?.setRemoteState(freshDB, freshRevision);
+        latestRemoteRevision = freshRevision;
         if (window.__estoqueLegacy) {
           window.__estoqueLegacy.replaceDB(freshDB);
           if (showUpdate) showToast("Atualizado");
@@ -155,6 +173,7 @@ export default function LegacyStockSystem() {
           throw new Error("Este acesso esta bloqueado. Fale com o Master do sistema.");
         }
         const { db: cloudDB, revision: cloudRevision } = await loadConsistentLegacyState(supabase);
+        latestRemoteRevision = cloudRevision;
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cloudDB));
         channel = installCloudSync(
           supabase,
@@ -169,7 +188,8 @@ export default function LegacyStockSystem() {
         };
         window.addEventListener("focus", refreshWhenVisible);
         document.addEventListener("visibilitychange", refreshWhenVisible);
-        refreshInterval = window.setInterval(refreshWhenVisible, 15_000);
+        const refreshEvery = window.matchMedia("(max-width: 768px)").matches ? 60_000 : 30_000;
+        refreshInterval = window.setInterval(refreshWhenVisible, refreshEvery);
 
         const response = await fetch(`${basePath}/legacy-body.html?v=${assetVersion}`, { cache: "no-store" });
         if (!response.ok) throw new Error("Nao foi possivel carregar a interface.");

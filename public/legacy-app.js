@@ -31,7 +31,10 @@ const FRACIONADOS_EDIT_TABS = new Set(['fracionados','saidasCentral','producoes'
 const PERFIS_SIMULAVEIS = new Set(['master','administrador','controle_fracionados','visualizador']);
 function previewSimulationAllowed(){
   const host = window.location.hostname;
-  return host==='localhost' || host==='127.0.0.1' || host.endsWith('.github.io');
+  // A simulação de perfis é exclusiva do desenvolvimento. No site publicado
+  // ela podia sobrepor a permissão real salva no Supabase e ocultar os botões
+  // de edição de um administrador.
+  return host==='localhost' || host==='127.0.0.1';
 }
 function previewSimulationRole(){
   try{
@@ -313,12 +316,27 @@ function daysBetween(dateStr){
   return Math.round((d-t)/86400000);
 }
 
+function ultimoSaldoAjustado(ajustes, produto){
+  // Um ajuste representa uma contagem física. Portanto, o último saldo
+  // informado substitui os ajustes anteriores para o mesmo produto.
+  const encontrados=(ajustes||[]).filter(a=>sameName(a.produto,produto));
+  const ultimo=encontrados.reduce((atual,item)=>{
+    if(!atual) return item;
+    const dataAtual=String(atual.data||''), dataItem=String(item.data||'');
+    if(dataItem!==dataAtual) return dataItem>dataAtual ? item : atual;
+    // Ajustes novos recebidos antes de uma atualização do banco ainda não
+    // possuem ordem; nesse caso, a posição final do formulário é a mais nova.
+    const ordemAtual=Number(atual.ordem||0), ordemItem=Number(item.ordem||0);
+    return ordemItem>=ordemAtual ? item : atual;
+  },null);
+  return ultimo ? Number(ultimo.novoSaldo||0) : null;
+}
 function saldoCentral(produto){
   const entradas = sumWhere(db.entradasCentral,'produto',produto,'quantidade');
   const saidas = sumWhere(db.saidasCentral,'produto',produto,'quantidade');
   const consumoDireto = db.producoes.reduce((a,p)=>sameName(p.produtoBruto,produto) ? a+Number(p.quantidadeUtilizada||0):a,0);
-  const ajustes = sumWhere(db.ajustesEstoque,'produto',produto,'diferenca');
-  return roundStock(entradas - saidas - consumoDireto + ajustes);
+  const saldoAjustado = ultimoSaldoAjustado(db.ajustesEstoque, produto);
+  return roundStock(saldoAjustado==null ? entradas - saidas - consumoDireto : saldoAjustado);
 }
 function saldoCozinhaBruto(produto){
   const recebido = db.saidasCentral.filter(s=>s.destino===getCozinhaNome()).reduce((a,r)=> sameName(r.produto,produto) ? a+Number(r.quantidade||0):a,0);
@@ -329,8 +347,8 @@ function saldoLocalBruto(produto, local){
   return roundStock(db.saidasCentral.filter(s=>s.destino===local).reduce((a,r)=> sameName(r.produto,produto) ? a+Number(r.quantidade||0):a,0));
 }
 function saldoCozinhaFracionado(produto){
-  const ajustes = sumWhere(db.ajustesFracionados,'produto',produto,'diferenca');
-  return roundStock(sumWhere(db.producoes,'produtoFracionado',produto,'quantidadeProduzida') - sumWhere(db.saidasFracionado,'produto',produto,'quantidade') + ajustes);
+  const saldoAjustado = ultimoSaldoAjustado(db.ajustesFracionados, produto);
+  return roundStock(saldoAjustado==null ? sumWhere(db.producoes,'produtoFracionado',produto,'quantidadeProduzida') - sumWhere(db.saidasFracionado,'produto',produto,'quantidade') : saldoAjustado);
 }
 function saldoLocalFracionado(produto, local){
   return roundStock(db.saidasFracionado.filter(s=>s.destino===local).reduce((a,r)=> sameName(r.produto,produto) ? a+Number(r.quantidade||0):a,0));
@@ -353,8 +371,17 @@ try{
   const savedTab = localStorage.getItem(CURRENT_TAB_KEY);
   if(savedTab && document.querySelector(`.navitem[data-tab="${savedTab}"]`)) currentTab = savedTab;
 }catch(e){}
+let navigationLocked=false;
 document.querySelectorAll('.navitem[data-tab]').forEach(btn=>{
-  btn.addEventListener('click', ()=>{ currentTab = btn.dataset.tab; try{localStorage.setItem(CURRENT_TAB_KEY,currentTab);}catch(e){} render(); closeMobileSidebar(); });
+  btn.addEventListener('click', ()=>{
+    const nextTab=btn.dataset.tab;
+    if(navigationLocked || !nextTab || nextTab===currentTab) return;
+    navigationLocked=true;
+    currentTab=nextTab;
+    try{localStorage.setItem(CURRENT_TAB_KEY,currentTab);}catch(e){}
+    render(); closeMobileSidebar();
+    setTimeout(()=>{navigationLocked=false;},180);
+  });
 });
 const logoutBtn = document.getElementById('logoutBtn');
 if(logoutBtn){
@@ -858,27 +885,54 @@ const defAjustesEstoque = {
 let crudEdit = null; // {key, idx} — controla o modo de edição de um registro já lançado
 let crudSearch = {};
 let crudCategoryFilter = {};
+let crudTableLimit = {};
 
 let ajusteEdit = null;
+let ajustesHistoryLimit = 60;
 function renderAjustesEstoque(){
   const c=document.getElementById('content');
   const editable=canEditTab('ajustesEstoque');
   const editing=ajusteEdit;
   const source=editing ? (editing.tipo==='fracionado' ? db.ajustesFracionados : db.ajustesEstoque) : null;
   const current=editing && source ? source[editing.idx] : null;
-  const allAjustes=[...(db.ajustesEstoque||[]).map((a,idx)=>({...a,tipo:'bruto',idx})),...(db.ajustesFracionados||[]).map((a,idx)=>({...a,tipo:'fracionado',idx}))].sort((a,b)=>String(b.data||'').localeCompare(String(a.data||'')));
-  c.innerHTML=`<h1 class="pagetitle">Ajuste de Estoque</h1><p class="pagesub">Corrija o saldo após uma contagem física de produtos brutos ou fracionados. Todo ajuste exige motivo e responsável.</p>${editable?`<div class="card"><h2>${current?'Editando Ajuste':'Novo Ajuste'}</h2><form class="entryform" id="form-ajuste-unificado"><div class="field"><label>Tipo de Produto</label><select name="tipo"><option value="">Selecione...</option><option value="bruto">Produto Bruto</option><option value="fracionado">Produto Fracionado</option></select></div><div class="field" style="position:relative"><label>Produto</label><input name="produto" autocomplete="off" placeholder="Escolha primeiro o tipo..."><div id="ajuste-produto-sugestoes" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:20;max-height:180px;overflow-y:auto;margin-top:5px;border:1px solid var(--border);border-radius:6px;background:#fff;box-shadow:0 8px 20px rgba(0,0,0,.12)"></div></div><div class="field"><label>Data</label><input type="date" name="data" readonly title="Data atual do dispositivo"></div><div class="field"><label>Novo Saldo (contagem física)</label><input type="number" name="novoSaldo" step="0.01" min="0"></div><div class="field"><label>Motivo do Ajuste</label><input type="text" name="motivo"></div><div class="field"><label>Responsável pelo Ajuste</label><input type="text" name="responsavel"></div><div class="field"><label>&nbsp;</label><div style="display:flex;gap:8px"><button class="btn" type="submit">${current?'Salvar alterações':'Registrar ajuste'}</button>${current?'<button class="btn secondary" type="button" id="cancelar-ajuste">Cancelar</button>':''}</div></div><div class="hint ajuste-saldo-hint" id="ajuste-unificado-hint"></div></form></div>`:'<div class="msg-ok" style="margin-bottom:18px">Acesso visualizador: os ajustes estão disponíveis apenas para consulta.</div>'}<div class="card"><h2>Histórico de Ajustes (${allAjustes.length})</h2>${allAjustes.length?`<table><thead><tr><th>Data</th><th>Tipo</th><th>Produto</th><th>Saldo Anterior</th><th>Novo Saldo</th><th>Diferença</th><th>Motivo</th><th>Responsável</th>${editable?'<th></th>':''}</tr></thead><tbody>${allAjustes.map(a=>{const dif=Number(a.diferenca||0);return `<tr><td>${fmtDate(a.data)}</td><td>${a.tipo==='bruto'?'Bruto':'Fracionado'}</td><td><strong>${escapeHtml(a.produto||'')}</strong></td><td>${fmtNum(a.saldoAnterior)}</td><td>${fmtNum(a.novoSaldo)}</td><td>${dif>0?'+':''}${fmtNum(dif)}</td><td>${escapeHtml(a.motivo||'')}</td><td>${escapeHtml(a.responsavel||'')}</td>${editable?`<td><button class="edit-ajuste" data-tipo="${a.tipo}" data-idx="${a.idx}" title="Editar">✎</button> <button class="del-ajuste" data-tipo="${a.tipo}" data-idx="${a.idx}" title="Excluir">✕</button></td>`:''}</tr>`;}).join('')}</tbody></table>`:'<div class="empty">Nenhum ajuste registrado ainda.</div>'}</div>`;
+  // A ordem do histórico segue o momento em que o ajuste foi registrado, não
+  // apenas a data digitada. Assim o último ajuste sempre aparece primeiro.
+  const allAjustes=[...(db.ajustesEstoque||[]).map((a,idx)=>({...a,tipo:'bruto',idx})),...(db.ajustesFracionados||[]).map((a,idx)=>({...a,tipo:'fracionado',idx}))].sort((a,b)=>String(b.data||'').localeCompare(String(a.data||'')) || Number(b.ordem||0)-Number(a.ordem||0));
+  const ajustesVisiveis=allAjustes.slice(0,ajustesHistoryLimit);
+  c.innerHTML=`<h1 class="pagetitle">Ajuste de Estoque</h1><p class="pagesub">Corrija o saldo após uma contagem física de produtos brutos ou fracionados. Todo ajuste exige motivo e responsável.</p>${editable?`<div class="card"><h2>${current?'Editando Ajuste':'Novo Ajuste'}</h2><form class="entryform" id="form-ajuste-unificado"><div class="field"><label>Tipo de Produto</label><select name="tipo"><option value="">Selecione...</option><option value="bruto">Produto Bruto</option><option value="fracionado">Produto Fracionado</option></select></div><div class="field" style="position:relative"><label>Produto</label><input name="produto" autocomplete="off" placeholder="Escolha primeiro o tipo..."><div id="ajuste-produto-sugestoes" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:20;max-height:180px;overflow-y:auto;margin-top:5px;border:1px solid var(--border);border-radius:6px;background:#fff;box-shadow:0 8px 20px rgba(0,0,0,.12)"></div></div><div class="field"><label>Data</label><input type="date" name="data" readonly title="Data atual do dispositivo"></div><div class="field"><label>Novo Saldo (contagem física)</label><input type="number" name="novoSaldo" step="0.01" min="0"></div><div class="field"><label>Motivo do Ajuste</label><input type="text" name="motivo"></div><div class="field"><label>Responsável pelo Ajuste</label><input type="text" name="responsavel"></div><div class="field"><label>&nbsp;</label><div style="display:flex;gap:8px"><button class="btn" type="submit">${current?'Salvar alterações':'Registrar ajuste'}</button>${current?'<button class="btn secondary" type="button" id="cancelar-ajuste">Cancelar</button>':''}</div></div><div class="hint ajuste-saldo-hint" id="ajuste-unificado-hint"></div></form></div>`:'<div class="msg-ok" style="margin-bottom:18px">Acesso visualizador: os ajustes estão disponíveis apenas para consulta.</div>'}<div class="card"><h2>Histórico de Ajustes (${allAjustes.length})</h2>${allAjustes.length?`<table><thead><tr><th>Data</th><th>Tipo</th><th>Produto</th><th>Saldo Anterior</th><th>Novo Saldo</th><th>Diferença</th><th>Motivo</th><th>Responsável</th>${editable?'<th></th>':''}</tr></thead><tbody>${ajustesVisiveis.map(a=>{const dif=Number(a.diferenca||0);return `<tr><td>${fmtDate(a.data)}</td><td>${a.tipo==='bruto'?'Bruto':'Fracionado'}</td><td><strong>${escapeHtml(a.produto||'')}</strong></td><td>${fmtNum(a.saldoAnterior)}</td><td>${fmtNum(a.novoSaldo)}</td><td>${dif>0?'+':''}${fmtNum(dif)}</td><td>${escapeHtml(a.motivo||'')}</td><td>${escapeHtml(a.responsavel||'')}</td>${editable?`<td><button class="edit-ajuste" data-tipo="${a.tipo}" data-idx="${a.idx}" title="Editar">✎</button> <button class="del-ajuste" data-tipo="${a.tipo}" data-idx="${a.idx}" title="Excluir">✕</button></td>`:''}</tr>`;}).join('')}</tbody></table>${allAjustes.length>ajustesVisiveis.length?`<div style="margin-top:14px"><button type="button" class="btn secondary" id="carregar-mais-ajustes">Carregar mais (${allAjustes.length-ajustesVisiveis.length})</button></div>`:''}`:'<div class="empty">Nenhum ajuste registrado ainda.</div>'}</div>`;
+  // Ajustes registrados compõem o histórico: não podem ser alterados pela tela.
+  // Mantemos somente a exclusão, que continua respeitando as permissões atuais.
+  c.querySelectorAll('.edit-ajuste').forEach(btn=>btn.remove());
+  c.querySelector('#carregar-mais-ajustes')?.addEventListener('click',()=>{ajustesHistoryLimit+=60;render();});
   c.querySelector('.card')?.classList.add('ajuste-entry-card');
   if(!editable) return;
   const form=c.querySelector('#form-ajuste-unificado'), tipo=form.querySelector('[name=tipo]'), produto=form.querySelector('[name=produto]'), sugestoes=form.querySelector('#ajuste-produto-sugestoes'), novoSaldo=form.querySelector('[name=novoSaldo]'), hint=form.querySelector('#ajuste-unificado-hint');
   const options=()=>tipo.value==='fracionado'?nomesOrdenados(db.fracionados):nomesOrdenados(db.brutos);
   function saldoAtual(){return tipo.value==='fracionado'?saldoCozinhaFracionado(produto.value):saldoCentral(produto.value);}
   function atualizarHint(){if(!produto.value){hint.textContent='';return;}const atual=saldoAtual(),dif=Number(novoSaldo.value||0)-atual;hint.textContent=`Saldo atual no sistema: ${fmtNum(atual)} → diferença do ajuste: ${dif>0?'+':''}${fmtNum(dif)}`;}
-  function atualizarProdutos(value){produto.disabled=!tipo.value;produto.placeholder=tipo.value?'Digite o nome do produto...':'Escolha primeiro o tipo...';produto.value=value||'';atualizarHint();}
-  function mostrarSugestoes(){const termo=searchText(produto.value);const itens=termo?options().filter(nome=>searchText(nome).includes(termo)).slice(0,12):[];sugestoes.style.display=itens.length?'block':'none';sugestoes.innerHTML=itens.map(nome=>`<button type="button" class="ajuste-produto-sugestao" data-nome="${escapeHtml(nome)}" style="display:block;width:100%;padding:8px 10px;border:0;border-bottom:1px solid var(--border);background:#fff;text-align:left;cursor:pointer">${escapeHtml(nome)}</button>`).join('');sugestoes.querySelectorAll('.ajuste-produto-sugestao').forEach(btn=>btn.addEventListener('click',()=>{produto.value=btn.dataset.nome;sugestoes.style.display='none';atualizarHint();}));}
+  let produtoSelecionado=false;
+  function ocultarSugestoes(){sugestoes.style.display='none';sugestoes.innerHTML='';}
+  function atualizarProdutos(value){produto.disabled=!tipo.value;produto.placeholder=tipo.value?'Digite o nome do produto...':'Escolha primeiro o tipo...';produto.value=value||'';produtoSelecionado=!!produto.value&&options().some(nome=>sameName(nome,produto.value));ocultarSugestoes();atualizarHint();}
+  function mostrarSugestoes(){
+    // Uma seleção confirmada não deve voltar a abrir a pesquisa quando o
+    // formulário for atualizado ou quando o foco estiver em outro campo.
+    if(produtoSelecionado || document.activeElement!==produto){ocultarSugestoes();return;}
+    const termo=searchText(produto.value);
+    const itens=termo?options().filter(nome=>searchText(nome).includes(termo)).slice(0,12):[];
+    sugestoes.style.display=itens.length?'block':'none';
+    sugestoes.innerHTML=itens.map(nome=>`<button type="button" class="ajuste-produto-sugestao" data-nome="${escapeHtml(nome)}" style="display:block;width:100%;padding:8px 10px;border:0;border-bottom:1px solid var(--border);background:#fff;text-align:left;cursor:pointer">${escapeHtml(nome)}</button>`).join('');
+    sugestoes.querySelectorAll('.ajuste-produto-sugestao').forEach(btn=>btn.addEventListener('click',()=>{produto.value=btn.dataset.nome;produtoSelecionado=true;ocultarSugestoes();atualizarHint();}));
+  }
   tipo.value=current?editing.tipo:'';atualizarProdutos(current&&current.produto);form.querySelector('[name=data]').value=todayStr();novoSaldo.value=current?current.novoSaldo:'';form.querySelector('[name=motivo]').value=current?current.motivo||'':'';form.querySelector('[name=responsavel]').value=current?current.responsavel||'':'';
-  tipo.addEventListener('change',()=>{atualizarProdutos('');mostrarSugestoes();});produto.addEventListener('input',()=>{atualizarHint();mostrarSugestoes();});novoSaldo.addEventListener('input',atualizarHint);
-  form.addEventListener('submit',e=>{e.preventDefault();const row={data:todayStr(),produto:produto.value,novoSaldo:parseFloat(novoSaldo.value),motivo:form.querySelector('[name=motivo]').value,responsavel:form.querySelector('[name=responsavel]').value};if(!tipo.value||!row.produto||isNaN(row.novoSaldo)||row.novoSaldo<0||!row.motivo.trim()||!row.responsavel.trim()){alert('Preencha tipo de produto, produto, novo saldo, motivo e responsável.');return;}if(!options().some(nome=>sameName(nome,row.produto))){alert('Selecione um produto da lista de sugestões.');return;}let atual=saldoAtual();if(current&&editing.tipo===tipo.value&&current.produto===row.produto)atual-=Number(current.diferenca||0);row.saldoAnterior=atual;row.diferenca=row.novoSaldo-atual;const target=tipo.value==='fracionado'?db.ajustesFracionados:db.ajustesEstoque;if(current)source.splice(editing.idx,1);target.push(row);ajusteEdit=null;saveDB();render();});
+  tipo.addEventListener('change',()=>{atualizarProdutos('');});
+  produto.addEventListener('input',()=>{produtoSelecionado=options().some(nome=>sameName(nome,produto.value));atualizarHint();mostrarSugestoes();});
+  produto.addEventListener('focus',mostrarSugestoes);
+  produto.addEventListener('blur',()=>setTimeout(ocultarSugestoes,150));
+  // Ao clicar em uma sugestão, o foco vai para o botão dela. Não a esconda
+  // nesse instante, pois isso interromperia a seleção antes do click.
+  form.addEventListener('focusin',event=>{if(event.target!==produto && !sugestoes.contains(event.target)) ocultarSugestoes();});
+  novoSaldo.addEventListener('input',atualizarHint);
+  form.addEventListener('submit',e=>{e.preventDefault();const row={data:todayStr(),produto:produto.value,novoSaldo:parseFloat(novoSaldo.value),motivo:form.querySelector('[name=motivo]').value,responsavel:form.querySelector('[name=responsavel]').value};if(!tipo.value||!row.produto||isNaN(row.novoSaldo)||row.novoSaldo<0||!row.motivo.trim()||!row.responsavel.trim()){alert('Preencha tipo de produto, produto, novo saldo, motivo e responsável.');return;}if(!options().some(nome=>sameName(nome,row.produto))){alert('Selecione um produto da lista de sugestões.');return;}let atual=saldoAtual();if(current&&editing.tipo===tipo.value&&current.produto===row.produto)atual-=Number(current.diferenca||0);row.saldoAnterior=atual;row.diferenca=row.novoSaldo-atual;const target=tipo.value==='fracionado'?db.ajustesFracionados:db.ajustesEstoque;if(current)source.splice(editing.idx,1);row.ordem=Date.now()*1000+Math.floor(Math.random()*1000);target.push(row);ajusteEdit=null;saveDB();render();});
   c.querySelector('#cancelar-ajuste')?.addEventListener('click',()=>{ajusteEdit=null;render();});
   c.querySelectorAll('.edit-ajuste').forEach(btn=>btn.addEventListener('click',()=>{ajusteEdit={tipo:btn.dataset.tipo,idx:parseInt(btn.dataset.idx)};render();}));
   c.querySelectorAll('.del-ajuste').forEach(btn=>btn.addEventListener('click',()=>{if(confirm('Excluir este ajuste?')){const target=btn.dataset.tipo==='fracionado'?db.ajustesFracionados:db.ajustesEstoque;target.splice(parseInt(btn.dataset.idx),1);saveDB();render();}}));
@@ -987,7 +1041,7 @@ function renderCrud(def){
   const errBox = document.createElement('div');
   form.appendChild(errBox);
 
-  form.addEventListener('submit', (e)=>{
+  form.addEventListener('submit', async (e)=>{
     e.preventDefault();
     const row = {};
     def.fields.forEach(f=>{
@@ -1002,6 +1056,28 @@ function renderCrud(def){
     const duplicidadeDoProprioNome = nomeMantido && err && err.startsWith('Já existe um produto');
     if(err && !duplicidadeDoProprioNome){
       alert(err); return;
+    }
+    if(editing!=null && (def.key==='brutos' || def.key==='fracionados')){
+      try{
+        if(!window.__estoqueCloudSync || typeof window.__estoqueCloudSync.updateProduct!=='function') throw new Error('A sincronização ainda não está pronta. Atualize a página e tente novamente.');
+        row.tipoProduto = editingRow.tipoProduto || (def.key==='brutos' ? 'Bruto' : 'Fracionado');
+        const submitButton=form.querySelector('button[type=submit]');
+        if(submitButton) submitButton.disabled=true;
+        await window.__estoqueCloudSync.updateProduct(def.key==='brutos'?'bruto':'fracionado', editingRow.nome, row);
+        crudEdit=null;
+        // A gravação foi confirmada; renderizar agora remove o modal e mostra
+        // imediatamente os dados já atualizados pela sincronização pontual.
+        render();
+      }catch(error){
+        const submitButton=form.querySelector('button[type=submit]');
+        if(submitButton) submitButton.disabled=false;
+        const message=error && error.message ? String(error.message) : '';
+        const duplicate=/duplicate key value|produtos_(brutos|fracionados)_nome_key/i.test(message);
+        alert(duplicate
+          ? 'Não foi possível salvar: já existe outro produto com esse nome. Escolha um nome diferente; produtos arquivados também preservam seus nomes para não perder o histórico.'
+          : (message ? `Não foi possível salvar o produto: ${message}` : 'Não foi possível salvar o produto.'));
+      }
+      return;
     }
     if(def.beforeSave) def.beforeSave(row, editing);
     if(editing!=null){ db[def.key][editing] = row; }
@@ -1032,14 +1108,14 @@ function renderCrud(def){
   renderTable(def, wrap.querySelector(`#table-${def.key}`));
   if(def.searchableTable){
     const search=wrap.querySelector(`#search-${def.key}`);
-    const applySearch=()=>{crudSearch[def.key]=search.value;renderTable(def,wrap.querySelector(`#table-${def.key}`));};
+    const applySearch=()=>{crudSearch[def.key]=search.value;crudTableLimit[def.key]=100;renderTable(def,wrap.querySelector(`#table-${def.key}`));};
     search.value=crudSearch[def.key]||'';
     search.addEventListener('input',applySearch);
     search.addEventListener('search',applySearch);
     const categoryFilter=wrap.querySelector(`#category-filter-${def.key}`);
     if(categoryFilter){
       categoryFilter.value=crudCategoryFilter[def.key]||'';
-      categoryFilter.addEventListener('change',()=>{crudCategoryFilter[def.key]=categoryFilter.value;renderTable(def,wrap.querySelector(`#table-${def.key}`));});
+      categoryFilter.addEventListener('change',()=>{crudCategoryFilter[def.key]=categoryFilter.value;crudTableLimit[def.key]=100;renderTable(def,wrap.querySelector(`#table-${def.key}`));});
     }
   }
 }
@@ -1055,18 +1131,21 @@ function renderTable(def, container){
   if(category) indexedRows=indexedRows.filter(({r})=>r.categoria===category);
   if(def.sortRows) indexedRows.sort((a,b)=>compareText(def.sortRows(a.r),def.sortRows(b.r)));
   if(indexedRows.length===0){ container.innerHTML=`<div class="empty">Nenhum registro encontrado para esta busca.</div>`; return; }
+  const limit=crudTableLimit[def.key]||100;
+  const rowsVisiveis=indexedRows.slice(0,limit);
   let html = `<table><thead><tr>`;
   def.columns.forEach(c=> html += `<th>${c.label}</th>`);
   if(canEditTab(def.key)) html += `<th></th>`;
   html += `</tr></thead><tbody>`;
-  indexedRows.forEach(({r, idx})=>{
+  rowsVisiveis.forEach(({r, idx})=>{
     html += `<tr>`;
     def.columns.forEach(c=> html += `<td>${c.render(r,idx)}</td>`);
     if(canEditTab(def.key)) html += `<td style="white-space:nowrap"><button class="editbtn" data-idx="${idx}" title="Editar">✎</button> <button class="delbtn" data-idx="${idx}" title="Excluir">✕</button></td>`;
     html += `</tr>`;
   });
-  html += `</tbody></table>`;
+  html += `</tbody></table>${indexedRows.length>rowsVisiveis.length?`<div style="margin-top:14px"><button type="button" class="btn secondary carregar-mais-registros">Carregar mais (${indexedRows.length-rowsVisiveis.length})</button></div>`:''}`;
   container.innerHTML = html;
+  container.querySelector('.carregar-mais-registros')?.addEventListener('click',()=>{crudTableLimit[def.key]=limit+100;renderTable(def,container);});
   wireCrudButtons(def, container, rows);
 }
 
