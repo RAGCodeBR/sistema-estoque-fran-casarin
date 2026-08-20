@@ -62,6 +62,7 @@ const clean = (value: unknown) => {
 };
 const rowMeta = (row: Record<string, any>) => ({
   _id: row.id,
+  _createdAt: row.criado_em,
   _updatedAt: row.atualizado_em,
 });
 

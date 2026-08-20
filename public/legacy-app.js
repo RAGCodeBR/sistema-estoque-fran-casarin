@@ -269,7 +269,8 @@ function saveDB(){
     // objeto antes do início da sincronização. Enviamos exatamente a fotografia
     // criada no momento em que o usuário confirmou o formulário.
     const snapshot = JSON.parse(JSON.stringify(db));
-    window.__estoqueCloudSync.save(snapshot, { immediate: currentTab==='saidasCentral' || currentTab==='saidasFracionado' });
+    const movimentoEstoque=['entradasCentral','saidasCentral','producoes','saidasFracionado','ajustesEstoque'].includes(currentTab);
+    window.__estoqueCloudSync.save(snapshot, { immediate: movimentoEstoque });
   }
   return true;
 }
@@ -369,27 +370,48 @@ function daysBetween(dateStr){
   return Math.round((d-t)/86400000);
 }
 
-function ultimoSaldoAjustado(ajustes, produto, produtos){
+function ultimoAjusteDoProduto(ajustes, produto, produtos){
   // Um ajuste representa uma contagem física. Portanto, o último saldo
   // informado substitui os ajustes anteriores para o mesmo produto.
   const encontrados=(ajustes||[]).filter(a=>sameCatalogReference(a,'produto',produto,'_produtoId',produtos));
-  const ultimo=encontrados.reduce((atual,item)=>{
+  return encontrados.reduce((atual,item)=>{
     if(!atual) return item;
-    const dataAtual=String(atual.data||''), dataItem=String(item.data||'');
-    if(dataItem!==dataAtual) return dataItem>dataAtual ? item : atual;
-    // Ajustes novos recebidos antes de uma atualização do banco ainda não
-    // possuem ordem; nesse caso, a posição final do formulário é a mais nova.
     const ordemAtual=Number(atual.ordem||0), ordemItem=Number(item.ordem||0);
-    return ordemItem>=ordemAtual ? item : atual;
+    if(ordemItem!==ordemAtual) return ordemItem>ordemAtual ? item : atual;
+    const criadoAtual=Date.parse(atual._createdAt||''), criadoItem=Date.parse(item._createdAt||'');
+    if(Number.isFinite(criadoAtual)&&Number.isFinite(criadoItem)&&criadoItem!==criadoAtual){
+      return criadoItem>criadoAtual ? item : atual;
+    }
+    return String(item.data||'')>=String(atual.data||'') ? item : atual;
   },null);
-  return ultimo ? Number(ultimo.novoSaldo||0) : null;
+}
+function movimentoDepoisDoAjuste(row,ajuste){
+  if(!ajuste) return true;
+  // Uma linha local sem ID ainda está aguardando confirmação do banco e,
+  // por definição, acabou de ser registrada depois dos dados já carregados.
+  if(!row || !row._id) return true;
+  const movimentoEm=Date.parse(row._createdAt||'');
+  const ajusteEm=Date.parse(ajuste._createdAt||'');
+  if(Number.isFinite(movimentoEm)&&Number.isFinite(ajusteEm)) return movimentoEm>ajusteEm;
+  // Compatibilidade defensiva com cópias locais antigas sem criado_em.
+  return String(row.data||'')>String(ajuste.data||'');
+}
+function sumWhereReferenceAfter(arr,nameField,name,sumField,idField,items,ajuste){
+  return (arr||[]).reduce((acc,row)=>sameCatalogReference(row,nameField,name,idField,items)&&movimentoDepoisDoAjuste(row,ajuste)
+    ? acc+Number(row[sumField]||0) : acc,0);
 }
 function saldoCentral(produto){
-  const entradas = sumWhereReference(db.entradasCentral,'produto',produto,'quantidade','_produtoId',db.brutos);
-  const saidas = sumWhereReference(db.saidasCentral,'produto',produto,'quantidade','_produtoId',db.brutos);
-  const consumoDireto = sumWhereReference(db.producoes,'produtoBruto',produto,'quantidadeUtilizada','_produtoBrutoId',db.brutos);
-  const saldoAjustado = ultimoSaldoAjustado(db.ajustesEstoque, produto, db.brutos);
-  return roundStock(saldoAjustado==null ? entradas - saidas - consumoDireto : saldoAjustado);
+  const ajuste = ultimoAjusteDoProduto(db.ajustesEstoque, produto, db.brutos);
+  const entradas = ajuste
+    ? sumWhereReferenceAfter(db.entradasCentral,'produto',produto,'quantidade','_produtoId',db.brutos,ajuste)
+    : sumWhereReference(db.entradasCentral,'produto',produto,'quantidade','_produtoId',db.brutos);
+  const saidas = ajuste
+    ? sumWhereReferenceAfter(db.saidasCentral,'produto',produto,'quantidade','_produtoId',db.brutos,ajuste)
+    : sumWhereReference(db.saidasCentral,'produto',produto,'quantidade','_produtoId',db.brutos);
+  const consumoDireto = ajuste
+    ? sumWhereReferenceAfter(db.producoes,'produtoBruto',produto,'quantidadeUtilizada','_produtoBrutoId',db.brutos,ajuste)
+    : sumWhereReference(db.producoes,'produtoBruto',produto,'quantidadeUtilizada','_produtoBrutoId',db.brutos);
+  return roundStock((ajuste ? Number(ajuste.novoSaldo||0) : 0) + entradas - saidas - consumoDireto);
 }
 function saldoCozinhaBruto(produto){
   const recebido = db.saidasCentral.filter(s=>sameCatalogReference(s,'destino',getCozinhaNome(),'_destinoId',db.locais))
@@ -402,11 +424,14 @@ function saldoLocalBruto(produto, local){
     .reduce((a,r)=>sameCatalogReference(r,'produto',produto,'_produtoId',db.brutos)?a+Number(r.quantidade||0):a,0));
 }
 function saldoCozinhaFracionado(produto){
-  const saldoAjustado = ultimoSaldoAjustado(db.ajustesFracionados, produto, db.fracionados);
-  return roundStock(saldoAjustado==null
-    ? sumWhereReference(db.producoes,'produtoFracionado',produto,'quantidadeProduzida','_produtoFracionadoId',db.fracionados)
-      - sumWhereReference(db.saidasFracionado,'produto',produto,'quantidade','_produtoId',db.fracionados)
-    : saldoAjustado);
+  const ajuste = ultimoAjusteDoProduto(db.ajustesFracionados, produto, db.fracionados);
+  const produzido = ajuste
+    ? sumWhereReferenceAfter(db.producoes,'produtoFracionado',produto,'quantidadeProduzida','_produtoFracionadoId',db.fracionados,ajuste)
+    : sumWhereReference(db.producoes,'produtoFracionado',produto,'quantidadeProduzida','_produtoFracionadoId',db.fracionados);
+  const saidas = ajuste
+    ? sumWhereReferenceAfter(db.saidasFracionado,'produto',produto,'quantidade','_produtoId',db.fracionados,ajuste)
+    : sumWhereReference(db.saidasFracionado,'produto',produto,'quantidade','_produtoId',db.fracionados);
+  return roundStock((ajuste ? Number(ajuste.novoSaldo||0) : 0) + produzido - saidas);
 }
 function saldoLocalFracionado(produto, local){
   return roundStock(db.saidasFracionado.filter(s=>sameCatalogReference(s,'destino',local,'_destinoId',db.locais))
