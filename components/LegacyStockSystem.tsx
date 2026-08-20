@@ -29,6 +29,7 @@ declare global {
       updateFractionedProductType: (nome: string, tipo: "Bruto" | "Fracionado") => Promise<void>;
       convertProductType: (origem: "bruto" | "fracionado", nome: string, tipo: "Bruto" | "Fracionado") => Promise<void>;
       archiveCategory: (nome: string) => Promise<void>;
+      archiveLocation: (id: string) => Promise<void>;
       updateProduct: (tipo: "bruto" | "fracionado", nomeAtual: string, produto: Record<string, unknown>) => Promise<void>;
       updateCatalog: (section: "categorias" | "locais", current: Record<string, unknown>, next: Record<string, unknown>) => Promise<void>;
       restoreBackup: (db: unknown) => Promise<void>;
@@ -56,7 +57,7 @@ declare global {
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 // Alterar este sufixo quando uma correção crítica for feita no script legado.
 // Assim navegadores que ainda tinham o JavaScript antigo carregam a versão nova.
-const assetVersion = `${process.env.NEXT_PUBLIC_APP_VERSION ?? "local"}-conversao-produto-com-historico-1`;
+const assetVersion = `${process.env.NEXT_PUBLIC_APP_VERSION ?? "local"}-arquivamento-seguro-de-locais-1`;
 const defaultEmail = "";
 
 function authErrorMessage(error: unknown) {

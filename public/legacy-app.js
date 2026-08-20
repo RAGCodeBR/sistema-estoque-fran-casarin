@@ -1272,7 +1272,9 @@ function wireCrudButtons(def, container, rows){
         if(reason){ alert(reason); return; }
       }
       const isProduct = def.key==='brutos' || def.key==='fracionados';
-      const confirmation = isProduct
+      const confirmation = def.key==='locais'
+        ? 'Remover este local do cadastro? As movimentações antigas continuarão preservadas.'
+        : isProduct
         ? 'Remover este produto do cadastro? O histórico de movimentações será preservado.'
         : 'Excluir este registro?';
       if(confirm(confirmation)){
@@ -1285,6 +1287,19 @@ function wireCrudButtons(def, container, rows){
           }catch(error){
             b.disabled=false;
             alert(error && error.message ? `Não foi possível excluir a categoria: ${error.message}` : 'Não foi possível excluir a categoria.');
+          }
+          return;
+        }
+        if(def.key==='locais'){
+          const location=rows[idx];
+          try{
+            if(!location._id) throw new Error('O local não possui identificador do banco. Atualize a página e tente novamente.');
+            if(!window.__estoqueCloudSync || typeof window.__estoqueCloudSync.archiveLocation!=='function') throw new Error('A sincronização ainda não está pronta. Atualize a página e tente novamente.');
+            b.disabled=true;
+            await window.__estoqueCloudSync.archiveLocation(String(location._id));
+          }catch(error){
+            b.disabled=false;
+            alert(error && error.message ? `Não foi possível excluir o local: ${error.message}` : 'Não foi possível excluir o local.');
           }
           return;
         }

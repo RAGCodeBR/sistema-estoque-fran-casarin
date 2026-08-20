@@ -282,7 +282,7 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
   return {
     ...emptyDB(),
     categorias: categorias.filter((c) => c.ativo !== false).map((c) => ({ ...rowMeta(c), nome: c.nome })),
-    locais: locais.map((l) => ({ ...rowMeta(l), nome: l.nome, tipo: l.tipo, responsavel: l.responsavel ?? "" })),
+    locais: locais.filter((l) => l.ativo !== false).map((l) => ({ ...rowMeta(l), nome: l.nome, tipo: l.tipo, responsavel: l.responsavel ?? "" })),
     brutos: brutos.filter((p) => p.ativo !== false).map((p) => ({
       ...rowMeta(p),
       nome: p.nome,
@@ -1103,6 +1103,16 @@ export function installCloudSync(
     },
     async archiveCategory(nome: string) {
       const { error } = await supabase.rpc("arquivar_categoria", { p_nome: nome });
+      if (error) throw error;
+      const { db: freshDB, revision } = await loadConsistentLegacyState(supabase);
+      window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(freshDB));
+      lastSavedDB = cloneDB(freshDB);
+      stockRevision = revision;
+      window.__estoqueLegacy?.replaceDB(freshDB);
+      window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
+    },
+    async archiveLocation(id: string) {
+      const { error } = await supabase.rpc("arquivar_local", { p_id: id });
       if (error) throw error;
       const { db: freshDB, revision } = await loadConsistentLegacyState(supabase);
       window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(freshDB));
