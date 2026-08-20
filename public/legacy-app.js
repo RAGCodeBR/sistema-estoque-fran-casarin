@@ -1213,6 +1213,10 @@ function wireCrudButtons(def, container, rows){
         if(!rows[idx]) return;
         const anterior = rows[idx].tipoProduto || 'Bruto';
         const tipo = select.value;
+        if(tipo!==anterior && !confirm(`Converter "${rows[idx].nome}" de ${anterior} para ${tipo}? O saldo atual será transferido e todo o histórico anterior será preservado.`)){
+          select.value=anterior;
+          return;
+        }
         select.disabled = true;
         rows[idx].tipoProduto = tipo;
         try{
@@ -1235,6 +1239,10 @@ function wireCrudButtons(def, container, rows){
         if(!rows[idx]) return;
         const anterior=rows[idx].tipoProduto||'Fracionado';
         const tipo=select.value;
+        if(tipo!==anterior && !confirm(`Converter "${rows[idx].nome}" de ${anterior} para ${tipo}? O saldo atual será transferido e todo o histórico anterior será preservado.`)){
+          select.value=anterior;
+          return;
+        }
         select.disabled=true;
         rows[idx].tipoProduto=tipo;
         try{
