@@ -300,7 +300,8 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
       categoria: categoriaPorId.get(p.categoria_id)?.nome ?? "Outros",
       tipoProduto: p.tipo_produto ?? "Fracionado",
       unidade: p.unidade,
-      origem: brutoPorId.get(p.origem_bruto_id)?.nome ?? "",
+      origem: brutoPorId.get(p.origem_bruto_id)?.nome ?? p.origem_bruto_nome_historico ?? "",
+      _origemId: p.origem_bruto_id ?? p.origem_bruto_historico_id,
       rendimento: num(p.rendimento_percent),
       estoqueMinimo: num(p.estoque_minimo),
       fornecedor: p.fornecedor ?? "",
@@ -309,9 +310,10 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
     })),
     entradasCentral: entradas.map((e) => ({
       ...rowMeta(e),
+      _produtoId: e.produto_bruto_id ?? e.produto_bruto_historico_id,
       data: e.data,
       nf: e.nf ?? "",
-      produto: brutoPorId.get(e.produto_bruto_id)?.nome ?? "",
+      produto: brutoPorId.get(e.produto_bruto_id)?.nome ?? e.produto_nome_historico ?? "",
       fornecedor: e.fornecedor ?? "",
       quantidade: num(e.quantidade),
       precoUnitario: num(e.preco_unitario),
@@ -319,32 +321,39 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
     })),
     saidasCentral: saidas.map((s) => ({
       ...rowMeta(s),
+      _produtoId: s.produto_bruto_id ?? s.produto_bruto_historico_id,
+      _destinoId: s.destino_local_id ?? s.destino_local_historico_id,
       data: s.data,
       documento: s.documento ?? "",
-      produto: brutoPorId.get(s.produto_bruto_id)?.nome ?? "",
-      destino: localPorId.get(s.destino_local_id)?.nome ?? "",
+      produto: brutoPorId.get(s.produto_bruto_id)?.nome ?? s.produto_nome_historico ?? "",
+      destino: localPorId.get(s.destino_local_id)?.nome ?? s.destino_nome_historico ?? "",
       quantidade: num(s.quantidade),
     })),
     producoes: producoes.map((p) => ({
       ...rowMeta(p),
+      _produtoBrutoId: p.produto_bruto_id ?? p.produto_bruto_historico_id,
+      _produtoFracionadoId: p.produto_fracionado_id ?? p.produto_fracionado_historico_id,
       data: p.data,
-      produtoBruto: brutoPorId.get(p.produto_bruto_id)?.nome ?? "",
+      produtoBruto: brutoPorId.get(p.produto_bruto_id)?.nome ?? p.produto_bruto_nome_historico ?? "",
       quantidadeUtilizada: num(p.quantidade_utilizada),
-      produtoFracionado: fracionadoPorId.get(p.produto_fracionado_id)?.nome ?? "",
+      produtoFracionado: fracionadoPorId.get(p.produto_fracionado_id)?.nome ?? p.produto_fracionado_nome_historico ?? "",
       quantidadeProduzida: num(p.quantidade_produzida),
     })),
     saidasFracionado: saidasFracionado.map((s) => ({
       ...rowMeta(s),
+      _produtoId: s.produto_fracionado_id ?? s.produto_fracionado_historico_id,
+      _destinoId: s.destino_local_id ?? s.destino_local_historico_id,
       data: s.data,
       documento: s.documento ?? "",
-      produto: fracionadoPorId.get(s.produto_fracionado_id)?.nome ?? "",
-      destino: localPorId.get(s.destino_local_id)?.nome ?? "",
+      produto: fracionadoPorId.get(s.produto_fracionado_id)?.nome ?? s.produto_nome_historico ?? "",
+      destino: localPorId.get(s.destino_local_id)?.nome ?? s.destino_nome_historico ?? "",
       quantidade: num(s.quantidade),
     })),
     ajustesEstoque: [...ajustes].sort((a, b) => Number(a.ordem ?? 0) - Number(b.ordem ?? 0)).map((a) => ({
       ...rowMeta(a),
+      _produtoId: a.produto_bruto_id ?? a.produto_bruto_historico_id,
       data: a.data,
-      produto: brutoPorId.get(a.produto_bruto_id)?.nome ?? "",
+      produto: brutoPorId.get(a.produto_bruto_id)?.nome ?? a.produto_nome_historico ?? "",
       saldoAnterior: num(a.saldo_anterior),
       novoSaldo: num(a.novo_saldo),
       diferenca: num(a.diferenca),
@@ -354,8 +363,9 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
     })),
     ajustesFracionados: [...ajustesFracionados].sort((a, b) => Number(a.ordem ?? 0) - Number(b.ordem ?? 0)).map((a) => ({
       ...rowMeta(a),
+      _produtoId: a.produto_fracionado_id ?? a.produto_fracionado_historico_id,
       data: a.data,
-      produto: fracionadoPorId.get(a.produto_fracionado_id)?.nome ?? "",
+      produto: fracionadoPorId.get(a.produto_fracionado_id)?.nome ?? a.produto_nome_historico ?? "",
       saldoAnterior: num(a.saldo_anterior),
       novoSaldo: num(a.novo_saldo),
       diferenca: num(a.diferenca),
@@ -365,8 +375,9 @@ export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> 
     })),
     pedidosCompra: pedidos.map((p) => ({
       ...rowMeta(p),
+      _produtoId: p.produto_bruto_id ?? p.produto_bruto_historico_id,
       data: p.data,
-      produto: brutoPorId.get(p.produto_bruto_id)?.nome ?? "",
+      produto: brutoPorId.get(p.produto_bruto_id)?.nome ?? p.produto_nome_historico ?? "",
       fornecedor: p.fornecedor ?? "",
       quantidadePedida: num(p.quantidade_pedida),
       precoEstimado: num(p.preco_estimado),
@@ -1113,6 +1124,16 @@ export function installCloudSync(
     },
     async archiveLocation(id: string) {
       const { error } = await supabase.rpc("arquivar_local", { p_id: id });
+      if (error) throw error;
+      const { db: freshDB, revision } = await loadConsistentLegacyState(supabase);
+      window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(freshDB));
+      lastSavedDB = cloneDB(freshDB);
+      stockRevision = revision;
+      window.__estoqueLegacy?.replaceDB(freshDB);
+      window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
+    },
+    async deleteCatalog(tipo: "categoria" | "local" | "bruto" | "fracionado", id: string) {
+      const { error } = await supabase.rpc("excluir_registro_definitivo", { p_tipo: tipo, p_id: id });
       if (error) throw error;
       const { db: freshDB, revision } = await loadConsistentLegacyState(supabase);
       window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(freshDB));

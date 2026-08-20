@@ -331,16 +331,37 @@ function parseBRNumber(s){
 function sumWhere(arr, field, val, sumField){
   return arr.reduce((acc,r)=> sameName(r[field],val) ? acc + Number(r[sumField]||0) : acc, 0);
 }
+function catalogItemByName(items,name){
+  return (items||[]).find(item=>sameName(item.nome,name)) || null;
+}
+function sameCatalogReference(row,nameField,name,idField,items){
+  const current=catalogItemByName(items,name);
+  const currentId=current&&current._id ? String(current._id) : '';
+  const rowId=row&&row[idField] ? String(row[idField]) : '';
+  if(currentId && rowId) return currentId===rowId;
+  // Registros recém-preenchidos ainda não receberam os metadados do banco.
+  // Nesse intervalo curto, o nome continua sendo a referência provisória.
+  if(currentId && !rowId) return sameName(row[nameField],name);
+  return !rowId && sameName(row[nameField],name);
+}
+function catalogItemForReference(row,nameField,idField,items){
+  const current=catalogItemByName(items,row&&row[nameField]);
+  return current&&sameCatalogReference(row,nameField,current.nome,idField,items) ? current : null;
+}
+function sumWhereReference(arr,nameField,name,sumField,idField,items){
+  return (arr||[]).reduce((acc,row)=>sameCatalogReference(row,nameField,name,idField,items)
+    ? acc+Number(row[sumField]||0) : acc,0);
+}
 function daysBetween(dateStr){
   const d = new Date(dateStr+"T00:00:00");
   const t = new Date(todayStr()+"T00:00:00");
   return Math.round((d-t)/86400000);
 }
 
-function ultimoSaldoAjustado(ajustes, produto){
+function ultimoSaldoAjustado(ajustes, produto, produtos){
   // Um ajuste representa uma contagem física. Portanto, o último saldo
   // informado substitui os ajustes anteriores para o mesmo produto.
-  const encontrados=(ajustes||[]).filter(a=>sameName(a.produto,produto));
+  const encontrados=(ajustes||[]).filter(a=>sameCatalogReference(a,'produto',produto,'_produtoId',produtos));
   const ultimo=encontrados.reduce((atual,item)=>{
     if(!atual) return item;
     const dataAtual=String(atual.data||''), dataItem=String(item.data||'');
@@ -353,26 +374,32 @@ function ultimoSaldoAjustado(ajustes, produto){
   return ultimo ? Number(ultimo.novoSaldo||0) : null;
 }
 function saldoCentral(produto){
-  const entradas = sumWhere(db.entradasCentral,'produto',produto,'quantidade');
-  const saidas = sumWhere(db.saidasCentral,'produto',produto,'quantidade');
-  const consumoDireto = db.producoes.reduce((a,p)=>sameName(p.produtoBruto,produto) ? a+Number(p.quantidadeUtilizada||0):a,0);
-  const saldoAjustado = ultimoSaldoAjustado(db.ajustesEstoque, produto);
+  const entradas = sumWhereReference(db.entradasCentral,'produto',produto,'quantidade','_produtoId',db.brutos);
+  const saidas = sumWhereReference(db.saidasCentral,'produto',produto,'quantidade','_produtoId',db.brutos);
+  const consumoDireto = sumWhereReference(db.producoes,'produtoBruto',produto,'quantidadeUtilizada','_produtoBrutoId',db.brutos);
+  const saldoAjustado = ultimoSaldoAjustado(db.ajustesEstoque, produto, db.brutos);
   return roundStock(saldoAjustado==null ? entradas - saidas - consumoDireto : saldoAjustado);
 }
 function saldoCozinhaBruto(produto){
-  const recebido = db.saidasCentral.filter(s=>s.destino===getCozinhaNome()).reduce((a,r)=> sameName(r.produto,produto) ? a+Number(r.quantidade||0):a,0);
-  const consumido = sumWhere(db.producoes,'produtoBruto',produto,'quantidadeUtilizada');
+  const recebido = db.saidasCentral.filter(s=>sameCatalogReference(s,'destino',getCozinhaNome(),'_destinoId',db.locais))
+    .reduce((a,r)=>sameCatalogReference(r,'produto',produto,'_produtoId',db.brutos)?a+Number(r.quantidade||0):a,0);
+  const consumido = sumWhereReference(db.producoes,'produtoBruto',produto,'quantidadeUtilizada','_produtoBrutoId',db.brutos);
   return roundStock(recebido - consumido);
 }
 function saldoLocalBruto(produto, local){
-  return roundStock(db.saidasCentral.filter(s=>s.destino===local).reduce((a,r)=> sameName(r.produto,produto) ? a+Number(r.quantidade||0):a,0));
+  return roundStock(db.saidasCentral.filter(s=>sameCatalogReference(s,'destino',local,'_destinoId',db.locais))
+    .reduce((a,r)=>sameCatalogReference(r,'produto',produto,'_produtoId',db.brutos)?a+Number(r.quantidade||0):a,0));
 }
 function saldoCozinhaFracionado(produto){
-  const saldoAjustado = ultimoSaldoAjustado(db.ajustesFracionados, produto);
-  return roundStock(saldoAjustado==null ? sumWhere(db.producoes,'produtoFracionado',produto,'quantidadeProduzida') - sumWhere(db.saidasFracionado,'produto',produto,'quantidade') : saldoAjustado);
+  const saldoAjustado = ultimoSaldoAjustado(db.ajustesFracionados, produto, db.fracionados);
+  return roundStock(saldoAjustado==null
+    ? sumWhereReference(db.producoes,'produtoFracionado',produto,'quantidadeProduzida','_produtoFracionadoId',db.fracionados)
+      - sumWhereReference(db.saidasFracionado,'produto',produto,'quantidade','_produtoId',db.fracionados)
+    : saldoAjustado);
 }
 function saldoLocalFracionado(produto, local){
-  return roundStock(db.saidasFracionado.filter(s=>s.destino===local).reduce((a,r)=> sameName(r.produto,produto) ? a+Number(r.quantidade||0):a,0));
+  return roundStock(db.saidasFracionado.filter(s=>sameCatalogReference(s,'destino',local,'_destinoId',db.locais))
+    .reduce((a,r)=>sameCatalogReference(r,'produto',produto,'_produtoId',db.fracionados)?a+Number(r.quantidade||0):a,0));
 }
 function statusBadge(saldo, minimo){
   if(saldo<=minimo) return `<span class="badge-status st-bad">⚠ ABAIXO DO MÍNIMO</span>`;
@@ -631,11 +658,7 @@ const defCategorias = {
   beforeSave:(row,editIdx)=>{
     if(editIdx!=null) renameCategoriaReferences(db.categorias[editIdx] && db.categorias[editIdx].nome,row.nome);
   },
-  canDelete:(row)=>{
-    const emUso = db.brutos.filter(b=>b.categoria===row.nome).length + db.fracionados.filter(f=>f.categoria===row.nome).length;
-    if(emUso>0) return `Não é possível excluir: ${emUso} produto(s) ainda usam a categoria "${row.nome}". Troque a categoria desses produtos antes de excluir.`;
-    return null;
-  }
+  canDelete:()=>null
 };
 
 const defEntradasCentral = {
@@ -1271,35 +1294,29 @@ function wireCrudButtons(def, container, rows){
         const reason = def.canDelete(rows[idx]);
         if(reason){ alert(reason); return; }
       }
-      const isProduct = def.key==='brutos' || def.key==='fracionados';
-      const confirmation = def.key==='locais'
-        ? 'Remover este local do cadastro? As movimentações antigas continuarão preservadas.'
-        : isProduct
-        ? 'Remover este produto do cadastro? O histórico de movimentações será preservado.'
+      const catalogType = def.key==='categorias' ? 'categoria'
+        : def.key==='locais' ? 'local'
+        : def.key==='brutos' ? 'bruto'
+        : def.key==='fracionados' ? 'fracionado'
+        : '';
+      const confirmation = catalogType==='local'
+        ? 'Excluir definitivamente este local? As movimentações antigas manterão o nome histórico.'
+        : catalogType==='categoria'
+        ? 'Excluir definitivamente esta categoria? Os produtos vinculados continuarão cadastrados como Outros.'
+        : catalogType
+        ? 'Excluir definitivamente este produto? O histórico será preservado e o nome poderá ser reutilizado sem herdar o estoque antigo.'
         : 'Excluir este registro?';
       if(confirm(confirmation)){
-        if(def.key==='categorias'){
-          const category=rows[idx];
+        if(catalogType){
+          const record=rows[idx];
           try{
-            if(!window.__estoqueCloudSync || typeof window.__estoqueCloudSync.archiveCategory!=='function') throw new Error('A sincronização ainda não está pronta. Atualize a página e tente novamente.');
+            if(!record._id) throw new Error('O registro não possui identificador do banco. Atualize a página e tente novamente.');
+            if(!window.__estoqueCloudSync || typeof window.__estoqueCloudSync.deleteCatalog!=='function') throw new Error('A sincronização ainda não está pronta. Atualize a página e tente novamente.');
             b.disabled=true;
-            await window.__estoqueCloudSync.archiveCategory(category.nome);
+            await window.__estoqueCloudSync.deleteCatalog(catalogType,String(record._id));
           }catch(error){
             b.disabled=false;
-            alert(error && error.message ? `Não foi possível excluir a categoria: ${error.message}` : 'Não foi possível excluir a categoria.');
-          }
-          return;
-        }
-        if(def.key==='locais'){
-          const location=rows[idx];
-          try{
-            if(!location._id) throw new Error('O local não possui identificador do banco. Atualize a página e tente novamente.');
-            if(!window.__estoqueCloudSync || typeof window.__estoqueCloudSync.archiveLocation!=='function') throw new Error('A sincronização ainda não está pronta. Atualize a página e tente novamente.');
-            b.disabled=true;
-            await window.__estoqueCloudSync.archiveLocation(String(location._id));
-          }catch(error){
-            b.disabled=false;
-            alert(error && error.message ? `Não foi possível excluir o local: ${error.message}` : 'Não foi possível excluir o local.');
+            alert(error && error.message ? `Não foi possível excluir o registro: ${error.message}` : 'Não foi possível excluir o registro.');
           }
           return;
         }
@@ -1458,7 +1475,7 @@ function getAlertasMinimo(){
 function getAlertasValidade(){
   const a = db.entradasCentral.filter(e=>e.validade).map(e=>({tipo:"Bruto (Central)", produto:e.produto, validade:e.validade, dias:daysBetween(e.validade)}));
   const b = db.producoes.map(p=>{
-    const f = db.fracionados.find(x=>x.nome===p.produtoFracionado);
+    const f = catalogItemForReference(p,'produtoFracionado','_produtoFracionadoId',db.fracionados);
     if(!f || !p.data) return null;
     const d = new Date(p.data+"T00:00:00"); d.setDate(d.getDate()+Number(f.validadeDias||0));
     const validade = d.toISOString().slice(0,10);
@@ -1468,7 +1485,7 @@ function getAlertasValidade(){
 }
 
 function pedidoPendenteFor(produto){
-  return db.pedidosCompra.find(p=>p.produto===produto && p.status==='pendente') || null;
+  return db.pedidosCompra.find(p=>p.status==='pendente' && sameCatalogReference(p,'produto',produto,'_produtoId',db.brutos)) || null;
 }
 
 let pedidoMensagens = []; // [{fornecedor, texto}] — mensagens geradas na última leva de pedidos
@@ -2290,7 +2307,7 @@ function renderSaidasPorDestino(rows, destinosOrdenados){
 function precoUnitarioBruto(produto){
   const bruto = db.brutos.find(b=>b.nome===produto);
   if(bruto && Number(bruto.precoMedio||0)>0) return Number(bruto.precoMedio||0);
-  const entradas = db.entradasCentral.filter(e=>e.produto===produto && Number(e.precoUnitario||0)>0);
+  const entradas = db.entradasCentral.filter(e=>sameCatalogReference(e,'produto',produto,'_produtoId',db.brutos) && Number(e.precoUnitario||0)>0);
   if(entradas.length===0) return 0;
   const totalQtd = entradas.reduce((a,e)=>a+Number(e.quantidade||0),0);
   const totalValor = entradas.reduce((a,e)=>a+Number(e.quantidade||0)*Number(e.precoUnitario||0),0);
@@ -2521,7 +2538,7 @@ function buildExcelWorkbook(){
   add('Locais', sheetRows(db.locais.map(l=>({ 'Local': l.nome, 'Tipo': l.tipo, 'Responsável': l.responsavel }))));
 
   add('Entrada na Central', sheetRows(db.entradasCentral.map(e=>{
-    const b = db.brutos.find(x=>x.nome===e.produto);
+    const b = catalogItemForReference(e,'produto','_produtoId',db.brutos);
     return { 'Data': fmtDate(e.data), 'NF': e.nf, 'Produto': e.produto, 'Fornecedor': e.fornecedor,
       'Quantidade': e.quantidade, 'Preço Pago (R$)': e.precoUnitario, 'Preço Médio Cadastrado (R$)': b?b.precoMedio:'',
       'Valor Total (R$)': (e.quantidade||0)*(e.precoUnitario||0), 'Validade': fmtDate(e.validade) };
@@ -2532,7 +2549,7 @@ function buildExcelWorkbook(){
   }))));
 
   add('Produção de Fracionados', sheetRows(db.producoes.map(p=>{
-    const f = db.fracionados.find(x=>x.nome===p.produtoFracionado);
+    const f = catalogItemForReference(p,'produtoFracionado','_produtoFracionadoId',db.fracionados);
     let validade = '';
     if(f && p.data){ const d = new Date(p.data+'T00:00:00'); d.setDate(d.getDate()+Number(f.validadeDias||0)); validade = fmtDate(d.toISOString().slice(0,10)); }
     return { 'Data': fmtDate(p.data), 'Bruto Utilizado': p.produtoBruto, 'Quantidade Utilizada': p.quantidadeUtilizada,
