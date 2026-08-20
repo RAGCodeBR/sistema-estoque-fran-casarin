@@ -331,8 +331,19 @@ function parseBRNumber(s){
 function sumWhere(arr, field, val, sumField){
   return arr.reduce((acc,r)=> sameName(r[field],val) ? acc + Number(r[sumField]||0) : acc, 0);
 }
+let catalogLookupCache = new WeakMap();
 function catalogItemByName(items,name){
-  return (items||[]).find(item=>sameName(item.nome,name)) || null;
+  if(!Array.isArray(items)) return null;
+  let index=catalogLookupCache.get(items);
+  if(!index){
+    index=new Map();
+    items.forEach(item=>{
+      const key=nameKey(item&&item.nome);
+      if(key&&!index.has(key)) index.set(key,item);
+    });
+    catalogLookupCache.set(items,index);
+  }
+  return index.get(nameKey(name)) || null;
 }
 function sameCatalogReference(row,nameField,name,idField,items){
   const current=catalogItemByName(items,name);
@@ -511,6 +522,10 @@ function setActiveNav(){
 
 /* ============================= RENDER ROOT ============================= */
 function render(){
+  // Produtos e locais podem ser alterados entre uma renderização e outra.
+  // O índice torna as associações por ID constantes durante o desenho da tela
+  // e é recriado aqui para nunca reutilizar nomes antigos após uma edição.
+  catalogLookupCache = new WeakMap();
   // A tela consolidada substituiu a antiga aba exclusiva de fracionados.
   if(currentTab==='estoqueFracionados') currentTab='estoqueCentral';
   if(!canViewTab(currentTab)) currentTab = isFracionadosAccess() ? 'estoqueCentral' : 'dashboard';
