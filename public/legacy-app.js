@@ -369,6 +369,23 @@ function daysBetween(dateStr){
   const t = new Date(todayStr()+"T00:00:00");
   return Math.round((d-t)/86400000);
 }
+function businessDateStr(value){
+  const date=value instanceof Date ? value : new Date(value);
+  if(Number.isNaN(date.getTime())) return '';
+  const parts=new Intl.DateTimeFormat('en-US',{
+    timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'
+  }).formatToParts(date);
+  const get=type=>parts.find(part=>part.type===type)?.value||'';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+function movimentoRegistradoHoje(row,hoje){
+  // Uma linha ainda sem ID acabou de ser criada no navegador e aguarda apenas
+  // a confirmação do Supabase. Depois da sincronização, criado_em passa a
+  // ser a fonte oficial para o resumo diário.
+  if(row&&!row._id&&!row._createdAt) return true;
+  const criadoEm=businessDateStr(row&&row._createdAt);
+  return criadoEm ? criadoEm===hoje : row&&row.data===hoje;
+}
 
 function ultimoAjusteDoProduto(ajustes, produto, produtos){
   // Um ajuste representa uma contagem física. Portanto, o último saldo
@@ -2421,9 +2438,9 @@ function renderDashboard(){
   const alertasVal = getAlertasValidade();
   const vencidosUrgentes = alertasVal.filter(x=>x.dias<=3).length;
   const atencao = alertasVal.filter(x=>x.dias>3 && x.dias<=7).length;
-  const hoje = todayStr();
-  const entradasHoje = db.entradasCentral.filter(e=>e.data===hoje);
-  const saidasHojeCount = db.saidasCentral.filter(s=>s.data===hoje).length + db.saidasFracionado.filter(s=>s.data===hoje).length;
+  const hoje = businessDateStr(new Date());
+  const entradasHoje = db.entradasCentral.filter(e=>movimentoRegistradoHoje(e,hoje));
+  const saidasHojeCount = db.saidasCentral.filter(s=>movimentoRegistradoHoje(s,hoje)).length + db.saidasFracionado.filter(s=>movimentoRegistradoHoje(s,hoje)).length;
   const valorEntradasHoje = entradasHoje.reduce((a,e)=>a+(e.quantidade||0)*(e.precoUnitario||0),0);
   const topMinimos = getAlertasMinimo().filter(x=>x.abaixo).slice(0,5);
 
@@ -2457,7 +2474,7 @@ function renderDashboard(){
   });
   html += `</div>`;
 
-  html += `<div><div class="card"><h2>Movimentações de hoje</h2><div class="today-moves"><div><small>Entradas</small><strong>${entradasHoje.length}</strong><span>${fmtMoney(valorEntradasHoje)}</span></div><div><small>Saídas</small><strong>${saidasHojeCount}</strong><span>registros</span></div></div></div>`;
+  html += `<div><div class="card"><h2>Movimentações registradas hoje</h2><div class="today-moves"><div><small>Entradas</small><strong>${entradasHoje.length}</strong><span>${fmtMoney(valorEntradasHoje)}</span></div><div><small>Saídas</small><strong>${saidasHojeCount}</strong><span>registros</span></div></div><p class="footnote">Considera o dia em que o lançamento foi feito no sistema, mesmo quando a nota ou movimentação possui outra data.</p></div>`;
   html += `<div class="card"><h2>Top 5 itens abaixo do mínimo</h2><table><thead><tr><th>Produto</th><th>Local</th><th>Atual</th><th>Mínimo</th></tr></thead><tbody>`;
   if(topMinimos.length===0){ html += `<tr><td colspan="4" class="empty">Nenhum item abaixo do mínimo.</td></tr>`; }
   topMinimos.forEach(x=>{
