@@ -2843,38 +2843,43 @@ function renderImportarNF(container, embedded=false){
       </div>
     </div>`;
 
-    html += `<div class="card"><h2>3. Itens Encontrados (${nfImport.itens.length})</h2>`;
+    html += `<div class="card import-items-card"><h2>3. Itens Encontrados (${nfImport.itens.length})</h2>`;
     if(nfImport.itens.length===0){
       html += `<div class="empty">Não conseguimos identificar os itens automaticamente nesta nota. Veja o texto extraído abaixo e lance manualmente na aba Entrada na Central.</div>`;
     } else {
-      html += `<table><thead><tr><th></th><th>Descrição (da nota)</th><th>Quantidade</th><th>Valor Unit.</th><th>Valor Total</th><th>Produto no Cadastro</th></tr></thead><tbody>`;
+      html += `<div class="import-items-help"><strong>Confira cada item antes de lançar.</strong><span>Vincule a um produto existente ou complete o cadastro quando for um produto novo.</span></div><div class="import-items-list">`;
       nfImport.itens.forEach((item, i)=>{
-        html += `<tr>
-          <td><input type="checkbox" class="nfIncluir" data-i="${i}" ${item.incluir?'checked':''}></td>
-          <td><input type="text" class="nfDesc" data-i="${i}" value="${escapeHtml(item.descricao)}" style="width:220px"></td>
-          <td><input type="number" step="0.01" class="nfQtd" data-i="${i}" value="${item.quantidade}" style="width:80px"></td>
-          <td><input type="number" step="0.01" class="nfPreco" data-i="${i}" value="${item.valorUnitario}" style="width:90px"></td>
-          <td class="nfTotalCell" data-i="${i}">${fmtMoney(item.quantidade*item.valorUnitario)}</td>
-          <td>
-            <select class="nfProduto" data-i="${i}">
+        html += `<article class="import-item${item.incluir?'':' is-disabled'}">
+          <div class="import-item__topline">
+            <label class="import-check"><input type="checkbox" class="nfIncluir" data-i="${i}" ${item.incluir?'checked':''}><span>Incluir no estoque</span></label>
+            <span class="import-item__number">Item ${String(i+1).padStart(2,'0')}</span>
+            <span class="import-item__status ${item.novoProduto?'is-new':'is-linked'}">${item.novoProduto?'Novo cadastro':'Produto vinculado'}</span>
+          </div>
+          <div class="import-item__grid">
+            <label class="import-control import-control--description"><span>Descrição da nota</span><input type="text" class="nfDesc" data-i="${i}" value="${escapeHtml(item.descricao)}"></label>
+            <label class="import-control"><span>Quantidade</span><input type="number" step="0.01" class="nfQtd" data-i="${i}" value="${item.quantidade}"></label>
+            <label class="import-control"><span>Valor unitário</span><input type="number" step="0.01" class="nfPreco" data-i="${i}" value="${item.valorUnitario}"></label>
+            <div class="import-control import-control--total"><span>Valor total</span><strong class="nfTotalCell" data-i="${i}">${fmtMoney(item.quantidade*item.valorUnitario)}</strong></div>
+            <label class="import-control import-control--product"><span>Produto no cadastro</span><select class="nfProduto" data-i="${i}">
               ${nomesOrdenados(db.brutos).map(nome=>`<option value="${escapeHtml(nome)}" ${item.matchProdutoNome===nome && !item.novoProduto?'selected':''}>${escapeHtml(nome)}</option>`).join('')}
               <option value="__novo__" ${item.novoProduto?'selected':''}>+ Cadastrar como novo produto</option>
-            </select>
-          </td>
-        </tr>`;
+            </select></label>
+          </div>`;
         if(item.novoProduto){
-          html += `<tr><td></td><td colspan="5">
-            <div class="entryform" style="background:var(--gold-lighter);padding:10px;border-radius:6px">
-              <div class="field"><label>Categoria</label><select class="nfNovaCategoria" data-i="${i}">${categoriaOptions().map(cat=>`<option ${item.novaCategoria===cat?'selected':''}>${cat}</option>`).join('')}</select></div>
-              <div class="field"><label>Unidade</label><select class="nfNovaUnidade" data-i="${i}">${UNIDADES.map(u=>`<option ${item.novaUnidade===u?'selected':''}>${u}</option>`).join('')}</select></div>
-              <div class="field"><label>Estoque Mínimo</label><input type="number" step="0.01" class="nfNovoMinimo" data-i="${i}" value="${item.novoMinimo}"></div>
-              <div class="field"><label>Validade Padrão (dias)</label><input type="number" class="nfNovaValidade" data-i="${i}" value="${item.novaValidadeDias}"></div>
+          html += `<section class="import-new-product">
+            <div class="import-new-product__heading"><div><strong>Dados do novo produto</strong><span>Este cadastro será criado junto com a entrada.</span></div></div>
+            <div class="import-new-product__grid">
+              <label class="import-control"><span>Categoria</span><select class="nfNovaCategoria" data-i="${i}">${categoriaOptions().map(cat=>`<option ${item.novaCategoria===cat?'selected':''}>${cat}</option>`).join('')}</select></label>
+              <label class="import-control"><span>Unidade</span><select class="nfNovaUnidade" data-i="${i}">${UNIDADES.map(u=>`<option ${item.novaUnidade===u?'selected':''}>${u}</option>`).join('')}</select></label>
+              <label class="import-control"><span>Estoque mínimo</span><input type="number" step="0.01" class="nfNovoMinimo" data-i="${i}" value="${item.novoMinimo}"></label>
+              <label class="import-control"><span>Validade padrão (dias)</span><input type="number" class="nfNovaValidade" data-i="${i}" value="${item.novaValidadeDias}"></label>
             </div>
-          </td></tr>`;
+          </section>`;
         }
+        html += `</article>`;
       });
-      html += `</tbody></table>`;
-      html += `<div style="margin-top:16px;display:flex;gap:10px;align-items:center"><button class="btn" id="btnConfirmarNF">✓ Confirmar e Lançar no Estoque</button><button class="btn secondary" type="button" id="btnCancelarNF">Cancelar PDF</button></div>`;
+      html += `</div>`;
+      html += `<div class="import-actions"><button class="btn" id="btnConfirmarNF">✓ Confirmar e Lançar no Estoque</button><button class="btn secondary" type="button" id="btnCancelarNF">Cancelar PDF</button></div>`;
     }
     html += `</div>`;
 
@@ -2897,7 +2902,10 @@ function renderImportarNF(container, embedded=false){
     const pre = c.querySelector('#nfRawText'); pre.style.display = pre.style.display==='none' ? 'block' : 'none';
   });
 
-  c.querySelectorAll('.nfIncluir').forEach(el=> el.addEventListener('change', e=>{ nfImport.itens[+e.target.dataset.i].incluir = e.target.checked; }));
+  c.querySelectorAll('.nfIncluir').forEach(el=> el.addEventListener('change', e=>{
+    nfImport.itens[+e.target.dataset.i].incluir = e.target.checked;
+    e.target.closest('.import-item')?.classList.toggle('is-disabled',!e.target.checked);
+  }));
   c.querySelectorAll('.nfDesc').forEach(el=> el.addEventListener('input', e=>{ nfImport.itens[+e.target.dataset.i].descricao = e.target.value; }));
   c.querySelectorAll('.nfQtd').forEach(el=> el.addEventListener('input', e=>{
     const i=+e.target.dataset.i; nfImport.itens[i].quantidade = parseFloat(e.target.value)||0; updateNFRowTotal(i);
@@ -3095,38 +3103,43 @@ function renderImportarXML(container, embedded=false){
     </div>`;
     html += avisoNotaDuplicadaHtml(notaDuplicada);
 
-    html += `<div class="card"><h2>3. Itens Encontrados (${xmlImport.itens.length})</h2>`;
+    html += `<div class="card import-items-card"><h2>3. Itens Encontrados (${xmlImport.itens.length})</h2>`;
     if(xmlImport.itens.length===0){
       html += `<div class="empty">Não encontramos itens compatíveis com NF-e neste XML. Confira o arquivo e tente novamente.</div>`;
     } else {
-      html += `<table><thead><tr><th></th><th>Item no XML</th><th>Quantidade</th><th>Preço de Custo</th><th>Total</th><th>Produto no Cadastro</th></tr></thead><tbody>`;
+      html += `<div class="import-items-help"><strong>Confira cada item antes de lançar.</strong><span>Vincule a um produto existente ou complete o cadastro quando for um produto novo.</span></div><div class="import-items-list">`;
       xmlImport.itens.forEach((item, i)=>{
-        html += `<tr>
-          <td><input type="checkbox" class="xmlIncluir" data-i="${i}" ${item.incluir?'checked':''}></td>
-          <td><input type="text" class="xmlDesc" data-i="${i}" value="${escapeHtml(item.descricao)}" style="width:220px"></td>
-          <td><input type="number" step="0.01" class="xmlQtd" data-i="${i}" value="${item.quantidade}" style="width:80px"></td>
-          <td><input type="number" step="0.01" class="xmlPreco" data-i="${i}" value="${item.valorUnitario}" style="width:90px"></td>
-          <td class="xmlTotalCell" data-i="${i}">${fmtMoney(item.quantidade*item.valorUnitario)}</td>
-          <td>
-            <select class="xmlProduto" data-i="${i}">
+        html += `<article class="import-item${item.incluir?'':' is-disabled'}">
+          <div class="import-item__topline">
+            <label class="import-check"><input type="checkbox" class="xmlIncluir" data-i="${i}" ${item.incluir?'checked':''}><span>Incluir no estoque</span></label>
+            <span class="import-item__number">Item ${String(i+1).padStart(2,'0')}</span>
+            <span class="import-item__status ${item.novoProduto?'is-new':'is-linked'}">${item.novoProduto?'Novo cadastro':'Produto vinculado'}</span>
+          </div>
+          <div class="import-item__grid">
+            <label class="import-control import-control--description"><span>Item no XML</span><input type="text" class="xmlDesc" data-i="${i}" value="${escapeHtml(item.descricao)}"></label>
+            <label class="import-control"><span>Quantidade</span><input type="number" step="0.01" class="xmlQtd" data-i="${i}" value="${item.quantidade}"></label>
+            <label class="import-control"><span>Preço de custo</span><input type="number" step="0.01" class="xmlPreco" data-i="${i}" value="${item.valorUnitario}"></label>
+            <div class="import-control import-control--total"><span>Valor total</span><strong class="xmlTotalCell" data-i="${i}">${fmtMoney(item.quantidade*item.valorUnitario)}</strong></div>
+            <label class="import-control import-control--product"><span>Produto no cadastro</span><select class="xmlProduto" data-i="${i}">
               ${nomesOrdenados(db.brutos).map(nome=>`<option value="${escapeHtml(nome)}" ${item.matchProdutoNome===nome && !item.novoProduto?'selected':''}>${escapeHtml(nome)}</option>`).join('')}
               <option value="__novo__" ${item.novoProduto?'selected':''}>+ Cadastrar como novo produto</option>
-            </select>
-          </td>
-        </tr>`;
+            </select></label>
+          </div>`;
         if(item.novoProduto){
-          html += `<tr><td></td><td colspan="5">
-            <div class="entryform" style="background:var(--gold-lighter);padding:10px;border-radius:6px">
-              <div class="field"><label>Categoria</label><select class="xmlNovaCategoria" data-i="${i}">${categoriaOptions().map(cat=>`<option ${item.novaCategoria===cat?'selected':''}>${cat}</option>`).join('')}</select></div>
-              <div class="field"><label>Unidade</label><select class="xmlNovaUnidade" data-i="${i}">${UNIDADES.map(u=>`<option ${item.novaUnidade===u?'selected':''}>${u}</option>`).join('')}</select></div>
-              <div class="field"><label>Estoque Mínimo</label><input type="number" step="0.01" class="xmlNovoMinimo" data-i="${i}" value="${item.novoMinimo}"></div>
-              <div class="field"><label>Validade Padrão (dias)</label><input type="number" class="xmlNovaValidade" data-i="${i}" value="${item.novaValidadeDias}"></div>
+          html += `<section class="import-new-product">
+            <div class="import-new-product__heading"><div><strong>Dados do novo produto</strong><span>Este cadastro será criado junto com a entrada.</span></div></div>
+            <div class="import-new-product__grid">
+              <label class="import-control"><span>Categoria</span><select class="xmlNovaCategoria" data-i="${i}">${categoriaOptions().map(cat=>`<option ${item.novaCategoria===cat?'selected':''}>${cat}</option>`).join('')}</select></label>
+              <label class="import-control"><span>Unidade</span><select class="xmlNovaUnidade" data-i="${i}">${UNIDADES.map(u=>`<option ${item.novaUnidade===u?'selected':''}>${u}</option>`).join('')}</select></label>
+              <label class="import-control"><span>Estoque mínimo</span><input type="number" step="0.01" class="xmlNovoMinimo" data-i="${i}" value="${item.novoMinimo}"></label>
+              <label class="import-control"><span>Validade padrão (dias)</span><input type="number" class="xmlNovaValidade" data-i="${i}" value="${item.novaValidadeDias}"></label>
             </div>
-          </td></tr>`;
+          </section>`;
         }
+        html += `</article>`;
       });
-      html += `</tbody></table>`;
-      html += `<div style="margin-top:16px;display:flex;gap:10px;align-items:center"><button class="btn" id="btnConfirmarXML" ${notaDuplicada?'disabled title="Nota já importada"':''}>Confirmar e Lançar no Estoque</button><button class="btn secondary" type="button" id="btnCancelarXML">Cancelar XML</button></div>`;
+      html += `</div>`;
+      html += `<div class="import-actions"><button class="btn" id="btnConfirmarXML" ${notaDuplicada?'disabled title="Nota já importada"':''}>Confirmar e Lançar no Estoque</button><button class="btn secondary" type="button" id="btnCancelarXML">Cancelar XML</button></div>`;
     }
     html += `</div>`;
 
@@ -3147,7 +3160,10 @@ function renderImportarXML(container, embedded=false){
   c.querySelector('#btnToggleXMLRaw')?.addEventListener('click', ()=>{
     const pre = c.querySelector('#xmlRawText'); pre.style.display = pre.style.display==='none' ? 'block' : 'none';
   });
-  c.querySelectorAll('.xmlIncluir').forEach(el=> el.addEventListener('change', e=>{ xmlImport.itens[+e.target.dataset.i].incluir = e.target.checked; }));
+  c.querySelectorAll('.xmlIncluir').forEach(el=> el.addEventListener('change', e=>{
+    xmlImport.itens[+e.target.dataset.i].incluir = e.target.checked;
+    e.target.closest('.import-item')?.classList.toggle('is-disabled',!e.target.checked);
+  }));
   c.querySelectorAll('.xmlDesc').forEach(el=> el.addEventListener('input', e=>{ xmlImport.itens[+e.target.dataset.i].descricao = e.target.value; }));
   c.querySelectorAll('.xmlQtd').forEach(el=> el.addEventListener('input', e=>{ const i=+e.target.dataset.i; xmlImport.itens[i].quantidade = parseFloat(e.target.value)||0; updateXMLRowTotal(i); }));
   c.querySelectorAll('.xmlPreco').forEach(el=> el.addEventListener('input', e=>{ const i=+e.target.dataset.i; xmlImport.itens[i].valorUnitario = parseFloat(e.target.value)||0; updateXMLRowTotal(i); }));
