@@ -2883,15 +2883,15 @@ function renderImportarNF(container, embedded=false){
             </select></label>
           </div>`;
         if(item.novoProduto){
-          html += `<section class="import-new-product">
-            <div class="import-new-product__heading"><div><strong>Dados do novo produto</strong><span>Este cadastro será criado junto com a entrada.</span></div></div>
+          html += `<details class="import-new-product">
+            <summary class="import-new-product__heading"><div><strong>Dados do novo produto</strong><span>Este cadastro será criado junto com a entrada.</span></div></summary>
             <div class="import-new-product__grid">
               <label class="import-control"><span>Categoria</span><select class="nfNovaCategoria" data-i="${i}">${categoriaOptions().map(cat=>`<option ${item.novaCategoria===cat?'selected':''}>${cat}</option>`).join('')}</select></label>
               <label class="import-control"><span>Unidade</span><select class="nfNovaUnidade" data-i="${i}">${UNIDADES.map(u=>`<option ${item.novaUnidade===u?'selected':''}>${u}</option>`).join('')}</select></label>
               <label class="import-control"><span>Estoque mínimo</span><input type="number" step="0.01" class="nfNovoMinimo" data-i="${i}" value="${item.novoMinimo}"></label>
               <label class="import-control"><span>Validade padrão (dias)</span><input type="number" class="nfNovaValidade" data-i="${i}" value="${item.novaValidadeDias}"></label>
             </div>
-          </section>`;
+          </details>`;
         }
         html += `</article>`;
       });
@@ -3063,6 +3063,12 @@ async function handleXMLFile(file){
 function updateXMLRowTotal(i){
   const cell = document.querySelector(`.xmlTotalCell[data-i="${i}"]`);
   if(cell) cell.textContent = fmtMoney(xmlImport.itens[i].quantidade * xmlImport.itens[i].valorUnitario);
+  const projectedStock = document.querySelector(`.xmlProjectedStock[data-i="${i}"]`);
+  if(projectedStock){
+    const item = xmlImport.itens[i];
+    const atual = !item.novoProduto && item.matchProdutoNome ? saldoCentral(item.matchProdutoNome) : 0;
+    projectedStock.value = fmtNum(atual + Number(item.quantidade||0));
+  }
 }
 function notaFiscalKey(nf){
   const raw = String(nf||'').trim();
@@ -3134,24 +3140,27 @@ function renderImportarXML(container, embedded=false){
           </div>
           <div class="import-item__grid">
             <label class="import-control import-control--description"><span>Item no XML</span><input type="text" class="xmlDesc" data-i="${i}" value="${escapeHtml(item.descricao)}"></label>
+            <label class="import-control import-control--stock"><span>Estoque atual</span><input type="text" value="${fmtNum(!item.novoProduto && item.matchProdutoNome ? saldoCentral(item.matchProdutoNome) : 0)}" readonly aria-label="Estoque atual do produto"></label>
             <label class="import-control"><span>Quantidade</span><input type="number" step="0.01" class="xmlQtd" data-i="${i}" value="${item.quantidade}"></label>
+            <label class="import-control import-control--stock"><span>Estoque após entrada</span><input type="text" class="xmlProjectedStock" data-i="${i}" value="${fmtNum((!item.novoProduto && item.matchProdutoNome ? saldoCentral(item.matchProdutoNome) : 0) + Number(item.quantidade||0))}" readonly aria-label="Estoque após a entrada"></label>
             <label class="import-control"><span>Preço de custo</span><input type="number" step="0.01" class="xmlPreco" data-i="${i}" value="${item.valorUnitario}"></label>
             <div class="import-control import-control--total"><span>Valor total</span><strong class="xmlTotalCell" data-i="${i}">${fmtMoney(item.quantidade*item.valorUnitario)}</strong></div>
             <label class="import-control import-control--product"><span>Produto no cadastro</span><select class="xmlProduto" data-i="${i}">
+              <option value="" ${!item.novoProduto && !item.matchProdutoNome?'selected':''}>Selecione um produto...</option>
               ${nomesOrdenados(db.brutos).map(nome=>`<option value="${escapeHtml(nome)}" ${item.matchProdutoNome===nome && !item.novoProduto?'selected':''}>${escapeHtml(nome)}</option>`).join('')}
               <option value="__novo__" ${item.novoProduto?'selected':''}>+ Cadastrar como novo produto</option>
             </select></label>
           </div>`;
         if(item.novoProduto){
-          html += `<section class="import-new-product">
-            <div class="import-new-product__heading"><div><strong>Dados do novo produto</strong><span>Este cadastro será criado junto com a entrada.</span></div></div>
+          html += `<details class="import-new-product">
+            <summary class="import-new-product__heading"><div><strong>Dados do novo produto</strong><span>Este cadastro será criado junto com a entrada.</span></div></summary>
             <div class="import-new-product__grid">
               <label class="import-control"><span>Categoria</span><select class="xmlNovaCategoria" data-i="${i}">${categoriaOptions().map(cat=>`<option ${item.novaCategoria===cat?'selected':''}>${cat}</option>`).join('')}</select></label>
               <label class="import-control"><span>Unidade</span><select class="xmlNovaUnidade" data-i="${i}">${UNIDADES.map(u=>`<option ${item.novaUnidade===u?'selected':''}>${u}</option>`).join('')}</select></label>
               <label class="import-control"><span>Estoque mínimo</span><input type="number" step="0.01" class="xmlNovoMinimo" data-i="${i}" value="${item.novoMinimo}"></label>
               <label class="import-control"><span>Validade padrão (dias)</span><input type="number" class="xmlNovaValidade" data-i="${i}" value="${item.novaValidadeDias}"></label>
             </div>
-          </section>`;
+          </details>`;
         }
         html += `</article>`;
       });
