@@ -57,7 +57,10 @@ function canEditSystem(){
   const papel = accessProfile().papel;
   return profileIsActive() && (papel==='master' || papel==='administrador');
 }
-function canManageUsers(){ return profileIsActive() && accessProfile().papel === 'master'; }
+function canManageUsers(){
+  const papel = accessProfile().papel;
+  return profileIsActive() && (papel==='master' || papel==='administrador');
+}
 function canViewTab(tab){
   if(tab==='usuarios') return canManageUsers();
   if(isFracionadosAccess()) return FRACIONADOS_TABS.has(tab);
@@ -1930,7 +1933,7 @@ function renderChangeMap(logs){
 async function renderUsuarios(){
   const c = document.getElementById('content');
   if(!canManageUsers()){
-    c.innerHTML = `<h1 class="pagetitle">Acesso restrito</h1><p class="pagesub">Somente o acesso Master pode gerenciar usuários.</p>`;
+    c.innerHTML = `<h1 class="pagetitle">Acesso restrito</h1><p class="pagesub">Somente Master ou Administrador pode gerenciar usuários.</p>`;
     return;
   }
   c.innerHTML = `<h1 class="pagetitle">Usuários e Logs</h1><p class="pagesub">Crie acessos, defina permissões e acompanhe alterações feitas no sistema.</p><div class="card"><div class="empty">Carregando usuários...</div></div>`;
@@ -1939,7 +1942,9 @@ async function renderUsuarios(){
       window.__estoqueAccess.listUsers(),
       window.__estoqueAccess.listAudit()
     ]);
-    let html = `<h1 class="pagetitle">Usuários e Logs</h1><p class="pagesub">Somente Master vê esta tela. Administrador edita o estoque, Visualizador apenas consulta.</p>`;
+    const meuId = window.__estoqueAccess.profile && window.__estoqueAccess.profile.user_id;
+    const papelAtual = roleLabel(accessProfile().papel);
+    let html = `<h1 class="pagetitle">Usuários e Logs</h1><p class="pagesub">Master e Administrador veem esta tela. Visualizador apenas consulta o estoque.</p>`;
     html += `<div class="card"><h2>Novo Acesso</h2>
       <form class="entryform" id="userForm">
         <div class="field"><label>Nome</label><input type="text" name="nome" placeholder="Nome do usuário"></div>
@@ -1948,18 +1953,20 @@ async function renderUsuarios(){
         <div class="field"><label>Nível</label><select name="papel"><option value="administrador">Administrador</option><option value="controle_fracionados">Controle de Fracionados</option><option value="visualizador">Visualizador</option></select></div>
         <div class="field"><label>&nbsp;</label><button class="btn" type="submit">Criar acesso</button></div>
       </form>
-      <p class="footnote">Master cria acessos e gerencia usuários. Administrador altera todo o estoque, mas não vê esta tela. Visualizador só consulta.</p>
+      <p class="footnote">Master e Administrador criam e gerenciam acessos e alteram todo o estoque. O acesso Master e o seu próprio acesso não podem ser alterados por aqui. Visualizador só consulta.</p>
     </div>`;
 
     html += `<div class="card"><h2>Acessos (${usuarios.length})</h2><table><thead><tr><th>E-mail</th><th>Nome</th><th>Nível</th><th>Status</th><th></th></tr></thead><tbody>`;
     usuarios.forEach(u=>{
-      const isMaster = u.papel === 'master';
+      // O banco não permite alterar o Master nem o próprio acesso; essas
+      // linhas ficam somente para leitura.
+      const protegido = u.papel === 'master' || u.user_id === meuId;
       html += `<tr>
-        <td><strong>${escapeHtml(u.email)}</strong></td>
-        <td>${isMaster ? escapeHtml(u.nome||'') : `<input type="text" class="userNome" data-id="${u.user_id}" value="${escapeHtml(u.nome||'')}">`}</td>
-        <td>${isMaster ? '<span class="badge-status st-ok">Master</span>' : `<select class="userPapel" data-id="${u.user_id}"><option value="administrador"${u.papel==='administrador'?' selected':''}>Administrador</option><option value="controle_fracionados"${u.papel==='controle_fracionados'?' selected':''}>Controle de Fracionados</option><option value="visualizador"${u.papel==='visualizador'?' selected':''}>Visualizador</option></select>`}</td>
-        <td>${isMaster ? 'Ativo' : `<select class="userAtivo" data-id="${u.user_id}"><option value="true"${u.ativo?' selected':''}>Ativo</option><option value="false"${!u.ativo?' selected':''}>Bloqueado</option></select>`}</td>
-        <td>${isMaster ? '—' : `<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn secondary btnSalvarUsuario" data-id="${u.user_id}">Salvar</button>${u.ativo ? `<button class="btn secondary btnResetSenha" data-id="${u.user_id}" data-email="${escapeHtml(u.email)}">Senha</button>` : ''}<button class="btn secondary btnExcluirUsuario" data-id="${u.user_id}" data-email="${escapeHtml(u.email)}">Excluir</button></div>`}</td>
+        <td><strong>${escapeHtml(u.email)}</strong>${u.user_id === meuId ? ' <span class="footnote">(você)</span>' : ''}</td>
+        <td>${protegido ? escapeHtml(u.nome||'') : `<input type="text" class="userNome" data-id="${u.user_id}" value="${escapeHtml(u.nome||'')}">`}</td>
+        <td>${protegido ? `<span class="badge-status st-ok">${roleLabel(u.papel)}</span>` : `<select class="userPapel" data-id="${u.user_id}"><option value="administrador"${u.papel==='administrador'?' selected':''}>Administrador</option><option value="controle_fracionados"${u.papel==='controle_fracionados'?' selected':''}>Controle de Fracionados</option><option value="visualizador"${u.papel==='visualizador'?' selected':''}>Visualizador</option></select>`}</td>
+        <td>${protegido ? (u.ativo ? 'Ativo' : 'Bloqueado') : `<select class="userAtivo" data-id="${u.user_id}"><option value="true"${u.ativo?' selected':''}>Ativo</option><option value="false"${!u.ativo?' selected':''}>Bloqueado</option></select>`}</td>
+        <td>${protegido ? '—' : `<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn secondary btnSalvarUsuario" data-id="${u.user_id}">Salvar</button>${u.ativo ? `<button class="btn secondary btnResetSenha" data-id="${u.user_id}" data-email="${escapeHtml(u.email)}">Senha</button>` : ''}<button class="btn secondary btnExcluirUsuario" data-id="${u.user_id}" data-email="${escapeHtml(u.email)}">Excluir</button></div>`}</td>
       </tr>`;
     });
     html += `</tbody></table></div>`;
@@ -2028,7 +2035,7 @@ async function renderUsuarios(){
         try{
           btn.disabled = true;
           btn.textContent = 'Excluindo...';
-          await window.__estoqueAccess.deleteUser({ user_id: id, motivo: 'Acesso removido pelo Master' });
+          await window.__estoqueAccess.deleteUser({ user_id: id, motivo: `Acesso removido pelo ${papelAtual}` });
           alert('Acesso excluído com sucesso.');
           await renderUsuarios();
         }catch(err){
@@ -2755,24 +2762,53 @@ function extractHeaderInfo(text){
     nf: nfMatch ? nfMatch[1].trim() : '',
     data: dataMatch ? brDateToIso(dataMatch[1]) : '',
     valorTotal: valorMatch ? parseBRNumber(valorMatch[1]) : null,
+    valorProdutos: extractValorTotalProdutos(text),
   };
 }
+// "V. TOTAL PRODUTOS" é o último rótulo da linha no quadro Cálculo do Imposto;
+// o valor é o último número da linha seguinte. Em outro leiaute, fica sem valor
+// e a conferência usa o total da nota.
+function extractValorTotalProdutos(text){
+  const m = text.match(/V(?:ALOR)?\.?\s*TOTAL\s*(?:DOS\s*)?PRODUTOS\s*\n([^\n]*)/i);
+  if(!m) return null;
+  const numeros = m[1].match(/\d[\d.]*,\d{2}/g);
+  return numeros ? parseBRNumber(numeros[numeros.length-1]) : null;
+}
 
+// Alguns emissores acrescentam um número ao código da unidade (KG1, UN1, PC1).
+function unidadeBaseNF(u){ return String(u||'').trim().toUpperCase().replace(/\d+$/,''); }
 function mapUnidadeNF(u){
-  const map = {UN:'UN', KG:'KG', KGM:'KG', CX:'CX', LT:'L', LITRO:'L', L:'L', G:'G', GR:'G', PCT:'PCT', PC:'UN', PC1:'UN'};
-  return map[(u||'').toUpperCase()] || 'UN';
+  const map = {UN:'UN', UND:'UN', UNID:'UN', KG:'KG', KGM:'KG', CX:'CX', LT:'L', LITRO:'L', L:'L', ML:'ML', G:'G', GR:'G', PCT:'PCT', PC:'UN'};
+  return map[unidadeBaseNF(u)] || 'UN';
 }
 
 function parseNFItems(text){
-  const sectionMatch = text.match(/DADOS DOS PRODUTOS[\s\S]*?(?=DADOS ADICIONAIS|INFORMA[ÇC][ÕO]ES COMPLEMENTARES|RESERVADO AO FISCO|$)/i);
-  const section = sectionMatch ? sectionMatch[0] : text;
-  // Cada item: [texto livre com descrição+código] NCM(8díg) CST CFOP(4díg) UN QUANT VALOR_UNIT VALOR_TOTAL
-  const itemRegex = /([\s\S]*?)(\d{8})\s+(\d\/\d{2}|\d{2,3})\s+(\d{4})\s+([A-Z]{1,4}\d{0,1})\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)/g;
+  // Cada página da DANFE repete o quadro de produtos; todas precisam ser lidas.
+  const sections = text.match(/DADOS DOS PRODUTOS[\s\S]*?(?=DADOS ADICIONAIS|INFORMA[ÇC][ÕO]ES COMPLEMENTARES|RESERVADO AO FISCO|DADOS DOS PRODUTOS|$)/gi) || [text];
+  return sections.flatMap(parseNFItemsSection);
+}
+// A linha de continuação da descrição fica logo abaixo do item (ex.: "PREMIUM 1,01KG").
+function linhaContinuacaoNF(linha){
+  return /[A-Za-zÀ-ÿ]/.test(linha) && !/^(VALOR|C[ÓO]DIGO|UNIT|DADOS|DESCRI)/i.test(linha) && !/V?BCFCP|PFCP|VFCP/i.test(linha);
+}
+function parseNFItemsSection(section){
+  // Cada item: [texto livre com descrição+código] NCM(8díg) CST/CSOSN(2-4díg) CFOP(4díg) UN QUANT VALOR_UNIT VALOR_TOTAL
+  const itemRegex = /([\s\S]*?)(\d{8})\s+(\d\/\d{2}|\d{2,4})\s+(\d{4})\s+([A-Z]{1,4}\d{0,3})\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)/g;
   const items = [];
-  let m;
+  let m, anterior = null;
+  const anexarContinuacao = rawLines => {
+    // rawLines[0] é o resto da linha do item anterior (colunas de impostos).
+    if(!anterior) return;
+    const extra = rawLines.slice(1).map(l=>l.trim()).filter(l=>l && linhaContinuacaoNF(l));
+    if(extra.length) anterior.descricao = `${anterior.descricao} ${extra.join(' ')}`.replace(/\s+/g,' ').trim();
+  };
+  let fim = 0;
   while((m = itemRegex.exec(section)) !== null){
+    fim = itemRegex.lastIndex;
     let preChunk = m[1].replace(/V?BCFCP:[\s\S]*?VFCP:\s*[\d.,]+/gi, '\n');
-    const lines = preChunk.split(/\n/).map(l=>l.trim()).filter(Boolean);
+    const rawLines = preChunk.split(/\n/);
+    anexarContinuacao(rawLines.slice(0, -1));
+    const lines = rawLines.map(l=>l.trim()).filter(Boolean);
     const lastLine = lines.length ? lines[lines.length-1] : '';
     let codigo = '', descricao = lastLine;
     const mTrail = lastLine.match(/^(.*\D)?(\d{3,8})\s*$/);
@@ -2784,11 +2820,23 @@ function parseNFItems(text){
     }
     descricao = descricao.replace(/\s+/g,' ').trim();
     if(!descricao || descricao.length<3) continue; // provavelmente sobra de cabeçalho, não um item de verdade
-    items.push({
+    anterior = {
       codigoNF: codigo, descricao,
       unidade: m[5], quantidade: parseBRNumber(m[6]), valorUnitario: parseBRNumber(m[7]), valorTotal: parseBRNumber(m[8]),
-    });
+    };
+    items.push(anterior);
   }
+  // Depois do último item da página só entram linhas de continuação imediatas;
+  // o rodapé ("Impresso em ...") não faz parte da descrição.
+  const resto = section.slice(fim).split(/\n/);
+  const continuacao = [resto[0]];
+  for(const linha of resto.slice(1)){
+    const t = linha.trim();
+    if(!t) continue;
+    if(continuacao.length>2 || /^IMPRESSO/i.test(t) || !linhaContinuacaoNF(t)) break;
+    continuacao.push(t);
+  }
+  anexarContinuacao(continuacao);
   return items;
 }
 
@@ -2817,14 +2865,7 @@ function handleNFFile(file){
       const text = await extractPdfText(window.pdfjsLib, arrayBuffer);
       const header = extractHeaderInfo(text);
       const itensRaw = parseNFItems(text);
-      const itens = itensRaw.map(it=>{
-        const match = findMatchingProduto(it.descricao);
-        return {
-          descricao: it.descricao, quantidade: it.quantidade, valorUnitario: it.valorUnitario,
-          incluir: true, matchProdutoNome: match ? match.produto.nome : '', novoProduto: !match,
-          novaCategoria: 'Outros', novaUnidade: mapUnidadeNF(it.unidade), novoMinimo: 0, novaValidadeDias: 0,
-        };
-      });
+      const itens = itensRaw.map(importItemFromRaw);
       nfImport = { fileName: file.name, rawText: text, header, itens };
       render();
     }catch(err){
@@ -2834,21 +2875,373 @@ function handleNFFile(file){
   });
 }
 
-function updateNFRowTotal(i){
-  const cell = document.querySelector(`.nfTotalCell[data-i="${i}"]`);
-  if(cell) cell.textContent = fmtMoney(nfImport.itens[i].quantidade * nfImport.itens[i].valorUnitario);
+/* ============================= IMPORTAÇÃO DE NF: REGRAS COMUNS (PDF e XML) =============================
+   A nota é gravada por um caminho exclusivo de inserção (RPC importar_nota_fiscal), tudo ou nada.
+   Nada é colocado no estoque da tela antes de o banco confirmar: se a gravação falhar, a nota
+   continua na tela como estava e nenhum item é lançado. */
+let importacaoGravando = false;
+
+function importItemFromRaw(it){
+  const match = findMatchingProduto(it.descricao);
+  const exato = !!match && match.score===100;
+  return {
+    descricao: it.descricao, quantidade: it.quantidade, valorUnitario: it.valorUnitario,
+    valorTotalNF: Number(it.valorTotal||0), unidadeNF: String(it.unidade||'').trim().toUpperCase(),
+    incluir: true,
+    // Só o nome equivalente é vinculado automaticamente. A correspondência
+    // parcial vira sugestão, e item sem correspondência exige escolha: o
+    // estoque nunca entra em outro produto, nem em um cadastro duplicado,
+    // sem que alguém confirme.
+    matchProdutoNome: exato ? match.produto.nome : '',
+    sugestaoProdutoNome: match && !exato ? match.produto.nome : '',
+    novoProduto: false,
+    novaCategoria: 'Outros', novaUnidade: mapUnidadeNF(it.unidade), novoMinimo: 0, novaValidadeDias: 0,
+  };
+}
+function unidadeCanonica(u){
+  const s = unidadeBaseNF(u);
+  // Embalagens de um item só (frasco, lata, garrafa, galão, balde, saco,
+  // pacote) equivalem a unidade. Caixa, fardo, dúzia e pacote múltiplo não.
+  const map = {KGM:'KG', KILO:'KG', LT:'L', LTS:'L', LITRO:'L', GR:'G', GRS:'G', PC:'UN', UND:'UN', UNID:'UN', UNI:'UN',
+    FR:'UN', LA:'UN', GF:'UN', GL:'UN', BD:'UN', SC:'UN', PT:'PCT', PAC:'PCT'};
+  return map[s] || s;
+}
+function totalReferenciaNotaPDF(header){
+  const produtos = Number(header && header.valorProdutos || 0);
+  if(produtos>0) return { valor: produtos, rotulo: 'total dos produtos da nota' };
+  const nota = Number(header && header.valorTotal || 0);
+  return nota>0 ? { valor: nota, rotulo: 'valor total da nota' } : null;
+}
+function somaItensNaoFecha(state){
+  const ref = totalReferenciaNotaPDF(state.header);
+  if(!ref) return null;
+  const soma = state.itens.reduce((acc,item)=>acc+Number(item.valorTotalNF||0),0);
+  return Math.abs(soma-ref.valor) > Math.max(0.05, ref.valor*0.01) ? { soma, ...ref } : null;
+}
+function produtoDoItemImportado(item){
+  return item && !item.novoProduto && item.matchProdutoNome ? (db.brutos||[]).find(b=>b.nome===item.matchProdutoNome) || null : null;
+}
+function unidadeDiferenteNaImportacao(item){
+  const prod = produtoDoItemImportado(item);
+  return !!(prod && item.unidadeNF && unidadeCanonica(item.unidadeNF)!==unidadeCanonica(prod.unidade));
+}
+function totalNaoFechaNaImportacao(item){
+  const total = Number(item.valorTotalNF||0);
+  if(!(total>0)) return false;
+  const calculado = Number(item.quantidade||0)*Number(item.valorUnitario||0);
+  return Math.abs(calculado-total) > Math.max(0.05, total*0.01);
+}
+function estoqueAposTextoNaImportacao(state, item){
+  if(item.novoProduto) return fmtNum(item.incluir ? Number(item.quantidade||0) : 0);
+  const prod = produtoDoItemImportado(item);
+  if(!prod) return '—';
+  // Soma todas as linhas desta nota vinculadas ao mesmo produto.
+  const daNota = (state.itens||[]).reduce((acc,x)=> x.incluir && !x.novoProduto && x.matchProdutoNome===item.matchProdutoNome ? acc+Number(x.quantidade||0) : acc, 0);
+  return fmtNum(saldoCentral(prod.nome) + daNota);
+}
+function statusItemImportacao(item){
+  if(item.novoProduto) return {cls:'is-new', txt:'Novo cadastro'};
+  if(item.matchProdutoNome) return {cls:'is-linked', txt:'Produto vinculado'};
+  return {cls:'is-pending', txt: item.sugestaoProdutoNome ? 'Confira a sugestão' : 'Selecione o produto'};
+}
+function htmlAvisosItemImportacao(item){
+  const avisos = [];
+  if(item.incluir && unidadeDiferenteNaImportacao(item)){
+    const prod = produtoDoItemImportado(item);
+    avisos.push(`Unidade na nota (${escapeHtml(item.unidadeNF)}) diferente da unidade do cadastro (${escapeHtml(prod.unidade||'—')}). Confira se a quantidade está na unidade do cadastro.`);
+  }
+  if(item.incluir && totalNaoFechaNaImportacao(item)){
+    avisos.push(`Quantidade × preço (${fmtMoney(Number(item.quantidade||0)*Number(item.valorUnitario||0))}) não bate com o total do item na nota (${fmtMoney(item.valorTotalNF)}). Confira a quantidade.`);
+  }
+  if(item.sugestaoProdutoNome && !item.matchProdutoNome && !item.novoProduto){
+    avisos.push(`Produto parecido no cadastro: <strong>${escapeHtml(item.sugestaoProdutoNome)}</strong>. Selecione-o se for o mesmo produto, ou cadastre como novo.`);
+  }
+  return avisos.map(a=>`<div class="import-item__warn">${a}</div>`).join('');
+}
+function htmlItensImportacao(p, state){
+  const erros = state.erros || {};
+  return state.itens.map((item, i)=>{
+    const st = statusItemImportacao(item);
+    const erro = erros[i];
+    const prod = produtoDoItemImportado(item);
+    const sugestao = item.sugestaoProdutoNome && !item.novoProduto && !item.matchProdutoNome
+      ? `<option value="${escapeHtml(item.sugestaoProdutoNome)}">Sugestão: ${escapeHtml(item.sugestaoProdutoNome)} (confira)</option>` : '';
+    let html = `<article class="import-item${item.incluir?'':' is-disabled'}${erro?' has-error':''}" data-item="${i}">
+      <div class="import-item__topline">
+        <label class="import-check"><input type="checkbox" class="${p}Incluir" data-i="${i}" ${item.incluir?'checked':''}><span>Incluir no estoque</span></label>
+        <span class="import-item__number">Item ${String(i+1).padStart(2,'0')}</span>
+        <span class="import-item__status ${st.cls}">${st.txt}</span>
+      </div>
+      ${erro ? `<div class="import-item__error" role="alert">${escapeHtml(erro)}</div>` : ''}
+      <div class="import-item__grid">
+        <label class="import-control import-control--description"><span>${p==='xml'?'Item no XML':'Descrição da nota'}</span><input type="text" class="${p}Desc" data-i="${i}" value="${escapeHtml(item.descricao)}"></label>
+        <label class="import-control import-control--stock"><span>Estoque atual</span><input type="text" value="${prod ? fmtNum(saldoCentral(prod.nome)) : '—'}" readonly aria-label="Estoque atual do produto"></label>
+        <label class="import-control"><span>Quantidade${item.unidadeNF ? ` (${escapeHtml(item.unidadeNF)} na nota)` : ''}</span><input type="number" step="0.001" min="0" class="${p}Qtd" data-i="${i}" value="${item.quantidade}"></label>
+        <label class="import-control import-control--stock"><span>Estoque após entrada</span><input type="text" class="${p}ProjectedStock" data-i="${i}" value="${estoqueAposTextoNaImportacao(state, item)}" readonly aria-label="Estoque após a entrada"></label>
+        <label class="import-control"><span>Preço de custo</span><input type="number" step="0.01" min="0" class="${p}Preco" data-i="${i}" value="${item.valorUnitario}"></label>
+        <div class="import-control import-control--total"><span>Valor total</span><strong class="${p}TotalCell" data-i="${i}">${fmtMoney(Number(item.quantidade||0)*Number(item.valorUnitario||0))}</strong></div>
+        <label class="import-control import-control--product"><span>Produto no cadastro${prod ? ` (unidade: ${escapeHtml(prod.unidade||'—')})` : ''}</span><select class="${p}Produto" data-i="${i}">
+          <option value="" ${!item.novoProduto && !item.matchProdutoNome?'selected':''}>Selecione um produto...</option>
+          ${sugestao}
+          ${nomesOrdenados(db.brutos).map(nome=>`<option value="${escapeHtml(nome)}" ${item.matchProdutoNome===nome && !item.novoProduto?'selected':''}>${escapeHtml(nome)}</option>`).join('')}
+          <option value="__novo__" ${item.novoProduto?'selected':''}>+ Cadastrar como novo produto</option>
+        </select></label>
+      </div>
+      <div class="import-item__warnings" data-i="${i}">${htmlAvisosItemImportacao(item)}</div>`;
+    if(item.novoProduto){
+      html += `<details class="import-new-product" open>
+        <summary class="import-new-product__heading"><div><strong>Dados do novo produto</strong><span>Será cadastrado com o nome da descrição acima, junto com a entrada.</span></div></summary>
+        <div class="import-new-product__grid">
+          <label class="import-control"><span>Categoria</span><select class="${p}NovaCategoria" data-i="${i}">${categoriaOptions().map(cat=>`<option value="${escapeHtml(cat)}" ${item.novaCategoria===cat?'selected':''}>${escapeHtml(cat)}</option>`).join('')}</select></label>
+          <label class="import-control"><span>Unidade</span><select class="${p}NovaUnidade" data-i="${i}">${UNIDADES.map(u=>`<option ${item.novaUnidade===u?'selected':''}>${u}</option>`).join('')}</select></label>
+          <label class="import-control"><span>Estoque mínimo</span><input type="number" step="0.01" min="0" class="${p}NovoMinimo" data-i="${i}" value="${item.novoMinimo}"></label>
+          <label class="import-control"><span>Validade padrão (dias)</span><input type="number" min="0" class="${p}NovaValidade" data-i="${i}" value="${item.novaValidadeDias}"></label>
+        </div>
+      </details>`;
+    }
+    return html + `</article>`;
+  }).join('');
+}
+function htmlAcoesImportacao(p, state, bloqueada){
+  const idConfirmar = p==='xml' ? 'btnConfirmarXML' : 'btnConfirmarNF';
+  const idCancelar = p==='xml' ? 'btnCancelarXML' : 'btnCancelarNF';
+  const desabilitar = bloqueada || importacaoGravando;
+  const titulo = bloqueada ? ' title="Nota já importada"' : '';
+  return `${state.erroGravacao ? `<div class="import-save-error" role="alert">${escapeHtml(state.erroGravacao)}</div>` : ''}
+    <div class="import-actions"><button class="btn" id="${idConfirmar}" ${desabilitar?'disabled':''}${titulo}>${importacaoGravando ? 'Gravando nota...' : '✓ Confirmar e Lançar no Estoque'}</button><button class="btn secondary" type="button" id="${idCancelar}" ${importacaoGravando?'disabled':''}>Cancelar ${p==='xml'?'XML':'PDF'}</button></div>`;
+}
+function atualizarCalculosImportacao(c, p, state){
+  state.itens.forEach((item, i)=>{
+    const total = c.querySelector(`.${p}TotalCell[data-i="${i}"]`);
+    if(total) total.textContent = fmtMoney(Number(item.quantidade||0)*Number(item.valorUnitario||0));
+    const apos = c.querySelector(`.${p}ProjectedStock[data-i="${i}"]`);
+    if(apos) apos.value = estoqueAposTextoNaImportacao(state, item);
+    const avisos = c.querySelector(`.import-item__warnings[data-i="${i}"]`);
+    if(avisos) avisos.innerHTML = htmlAvisosItemImportacao(item);
+  });
+}
+function limparErroItemImportacao(state, i){
+  if(state.erros && state.erros[i]){ delete state.erros[i]; }
+}
+function bindItensImportacao(c, p, state, tipo){
+  c.querySelectorAll(`.${p}Incluir`).forEach(el=> el.addEventListener('change', e=>{
+    const i = +e.target.dataset.i;
+    state.itens[i].incluir = e.target.checked;
+    limparErroItemImportacao(state, i);
+    e.target.closest('.import-item')?.classList.toggle('is-disabled', !e.target.checked);
+    atualizarCalculosImportacao(c, p, state);
+  }));
+  c.querySelectorAll(`.${p}Desc`).forEach(el=> el.addEventListener('input', e=>{ state.itens[+e.target.dataset.i].descricao = e.target.value; }));
+  c.querySelectorAll(`.${p}Qtd`).forEach(el=> el.addEventListener('input', e=>{
+    const i = +e.target.dataset.i;
+    state.itens[i].quantidade = parseFloat(e.target.value)||0;
+    atualizarCalculosImportacao(c, p, state);
+  }));
+  c.querySelectorAll(`.${p}Preco`).forEach(el=> el.addEventListener('input', e=>{
+    const i = +e.target.dataset.i;
+    state.itens[i].valorUnitario = parseFloat(e.target.value)||0;
+    atualizarCalculosImportacao(c, p, state);
+  }));
+  c.querySelectorAll(`.${p}Produto`).forEach(el=> el.addEventListener('change', e=>{
+    const i = +e.target.dataset.i; const v = e.target.value;
+    if(v==='__novo__'){ state.itens[i].novoProduto = true; state.itens[i].matchProdutoNome = ''; }
+    else { state.itens[i].novoProduto = false; state.itens[i].matchProdutoNome = v; }
+    limparErroItemImportacao(state, i);
+    render();
+  }));
+  c.querySelectorAll(`.${p}NovaCategoria`).forEach(el=> el.addEventListener('change', e=>{ state.itens[+e.target.dataset.i].novaCategoria = e.target.value; }));
+  c.querySelectorAll(`.${p}NovaUnidade`).forEach(el=> el.addEventListener('change', e=>{ state.itens[+e.target.dataset.i].novaUnidade = e.target.value; }));
+  c.querySelectorAll(`.${p}NovoMinimo`).forEach(el=> el.addEventListener('input', e=>{ state.itens[+e.target.dataset.i].novoMinimo = parseFloat(e.target.value)||0; }));
+  c.querySelectorAll(`.${p}NovaValidade`).forEach(el=> el.addEventListener('input', e=>{ state.itens[+e.target.dataset.i].novaValidadeDias = parseFloat(e.target.value)||0; }));
+  c.querySelector(p==='xml' ? '#btnConfirmarXML' : '#btnConfirmarNF')?.addEventListener('click', ()=> confirmarImportacaoNota(tipo));
+}
+function validarItensImportacao(state){
+  const erros = {};
+  state.itens.forEach((item, i)=>{
+    if(!item.incluir) return;
+    // O banco guarda 3 casas decimais e exige quantidade maior que zero.
+    const quantidade = Math.round(Number(item.quantidade)*1000)/1000;
+    if(!Number.isFinite(quantidade) || quantidade<=0){ erros[i] = 'Quantidade inválida: informe um valor maior que zero, ou desmarque "Incluir no estoque".'; return; }
+    const preco = Number(item.valorUnitario||0);
+    if(!Number.isFinite(preco) || preco<0){ erros[i] = 'Preço inválido.'; return; }
+    if(item.novoProduto){
+      const nome = cleanCatalogName(item.descricao);
+      if(!nome){ erros[i] = 'Informe o nome do produto novo no campo de descrição.'; return; }
+      const existente = (db.brutos||[]).find(b=>sameName(b.nome, nome));
+      if(existente) erros[i] = `Já existe o produto "${existente.nome}" no cadastro. Selecione-o na lista em vez de cadastrar um novo.`;
+      return;
+    }
+    if(!item.matchProdutoNome){ erros[i] = 'Selecione o produto do cadastro, escolha "+ Cadastrar como novo produto", ou desmarque "Incluir no estoque".'; return; }
+    const prod = produtoDoItemImportado(item);
+    if(!prod){ erros[i] = 'O produto selecionado não existe mais no cadastro. Selecione novamente.'; return; }
+    if(!prod._id) erros[i] = 'Este produto ainda está sendo gravado. Aguarde alguns segundos e tente novamente.';
+  });
+  return erros;
+}
+function avisosConfirmacaoImportacao(state, tipo){
+  const avisos = [];
+  state.itens.forEach((item, i)=>{
+    if(!item.incluir) return;
+    const n = String(i+1).padStart(2,'0');
+    if(unidadeDiferenteNaImportacao(item)) avisos.push(`Item ${n}: unidade na nota (${item.unidadeNF}) diferente do cadastro (${produtoDoItemImportado(item).unidade||'—'}).`);
+    if(totalNaoFechaNaImportacao(item)) avisos.push(`Item ${n}: quantidade × preço não bate com o total do item na nota.`);
+  });
+  const diferenca = tipo==='pdf' ? somaItensNaoFecha(state) : null;
+  if(diferenca){
+    avisos.push(`A soma dos itens lidos (${fmtMoney(diferenca.soma)}) é diferente do ${diferenca.rotulo} (${fmtMoney(diferenca.valor)}). Confira se o leitor de PDF encontrou todos os itens.`);
+  }
+  return avisos;
+}
+function validadePorDias(data, dias){
+  if(!data) return '';
+  const d = new Date(data+'T00:00:00');
+  d.setDate(d.getDate()+Number(dias||0));
+  return d.toISOString().slice(0,10);
+}
+function montarPayloadImportacao(state, tipo){
+  const header = state.header;
+  return {
+    origem: tipo, nf: header.nf||'', fornecedor: header.fornecedor||'', data: header.data,
+    itens: state.itens.map((item, i)=>({item, i})).filter(x=>x.item.incluir).map(({item, i})=>{
+      const out = { indice: i+1, quantidade: Number(item.quantidade), precoUnitario: Number(item.valorUnitario||0) };
+      if(item.novoProduto){
+        out.novoProduto = {
+          nome: cleanCatalogName(item.descricao), categoria: item.novaCategoria||'Outros', unidade: item.novaUnidade||'UN',
+          estoqueMinimo: Number(item.novoMinimo||0), validadeDias: Number(item.novaValidadeDias||0),
+        };
+        out.validade = validadePorDias(header.data, item.novaValidadeDias);
+      } else {
+        const prod = produtoDoItemImportado(item);
+        out.produtoId = String(prod._id);
+        out.validade = validadePorDias(header.data, prod.validadeDias);
+      }
+      return out;
+    }),
+  };
+}
+function avisoSaidaDuranteImportacao(e){ e.preventDefault(); e.returnValue = ''; }
+function bloquearTelaImportacao(ativo){
+  const existente = document.getElementById('importacaoBloqueio');
+  if(!ativo){
+    existente?.remove();
+    window.removeEventListener('beforeunload', avisoSaidaDuranteImportacao);
+    return;
+  }
+  if(document.activeElement && typeof document.activeElement.blur==='function') document.activeElement.blur();
+  if(!existente){
+    const el = document.createElement('div');
+    el.id = 'importacaoBloqueio';
+    el.className = 'import-lock';
+    el.setAttribute('role', 'alertdialog');
+    el.setAttribute('aria-live', 'assertive');
+    el.innerHTML = `<div class="import-lock__box"><strong>Gravando a nota fiscal…</strong><span>Aguarde a confirmação do banco. Não feche nem recarregue esta página.</span></div>`;
+    document.body.appendChild(el);
+  }
+  window.addEventListener('beforeunload', avisoSaidaDuranteImportacao);
+}
+function mensagemErroImportacao(err){
+  const texto = String((err && err.message) || err || 'Erro desconhecido.');
+  const codigo = err && err.code ? String(err.code) : '';
+  // Sem código do banco e com falha de rede, não há como saber se a
+  // resposta se perdeu depois da gravação.
+  if(!codigo && /fetch|network|load failed|timeout|conex/i.test(texto)) return { incerto: true, texto };
+  return { incerto: false, texto };
+}
+// O alerta bloqueia a tela antes de o navegador redesenhá-la; sem esta pausa,
+// o aviso "Gravando a nota" continuaria visível atrás da mensagem final.
+function esperarPinturaDaTela(){ return new Promise(resolve=>setTimeout(resolve, 60)); }
+async function confirmarImportacaoNota(tipo){
+  const state = tipo==='xml' ? xmlImport : nfImport;
+  if(!state || importacaoGravando) return;
+  if(!ensureCanEdit()) return;
+  const header = state.header;
+  state.erros = {};
+  state.erroGravacao = '';
+  if(!header.data){ alert('Informe a data de emissão da nota.'); return; }
+  const duplicada = findNotaJaLancada(header);
+  if(duplicada){
+    alert(`Importação bloqueada: a NF ${duplicada.nf || header.nf} já foi importada e concluída no sistema${duplicada.data ? ` em ${fmtDate(duplicada.data)}` : ''}.`);
+    render();
+    return;
+  }
+  const incluidos = state.itens.filter(item=>item.incluir);
+  if(incluidos.length===0){ alert('Nenhum item marcado para lançamento.'); return; }
+
+  const erros = validarItensImportacao(state);
+  const qtdErros = Object.keys(erros).length;
+  if(qtdErros>0){
+    state.erros = erros;
+    state.erroGravacao = `Corrija ${qtdErros} item(ns) destacado(s) antes de lançar. Nada foi gravado.`;
+    render();
+    document.querySelector('.import-item.has-error')?.scrollIntoView({behavior:'smooth', block:'center'});
+    return;
+  }
+
+  const novos = incluidos.filter(item=>item.novoProduto).length;
+  const avisos = avisosConfirmacaoImportacao(state, tipo);
+  const resumo = `Lançar ${incluidos.length} item(ns) na Entrada da Central?`
+    + (novos ? `\n${novos} produto(s) novo(s) serão cadastrados.` : '')
+    + (incluidos.length<state.itens.length ? `\n${state.itens.length-incluidos.length} item(ns) desmarcado(s) não serão lançados.` : '')
+    + (avisos.length ? `\n\nAtenção, confira antes de confirmar:\n- ${avisos.join('\n- ')}` : '');
+  if(!confirm(resumo)) return;
+
+  if(!window.__estoqueCloudSync || typeof window.__estoqueCloudSync.importInvoice!=='function'){
+    alert('A sincronização ainda não está pronta. Atualize a página e tente novamente. Nada foi gravado.');
+    return;
+  }
+  const payload = montarPayloadImportacao(state, tipo);
+  importacaoGravando = true;
+  bloquearTelaImportacao(true);
+  render();
+  try{
+    const resultado = await window.__estoqueCloudSync.importInvoice(payload);
+    importacaoGravando = false;
+    bloquearTelaImportacao(false);
+    if(tipo==='xml') xmlImport = null; else nfImport = null;
+    currentTab = 'entradasCentral';
+    render();
+    await esperarPinturaDaTela();
+    alert(`Nota gravada no banco: ${resultado.entradas} entrada(s) lançada(s) na Central`
+      + (resultado.produtosCriados ? ` e ${resultado.produtosCriados} produto(s) novo(s) cadastrado(s)` : '') + '.'
+      + (resultado.atualizacaoPendente ? '\n\nA lista será atualizada em instantes.' : ''));
+  }catch(err){
+    importacaoGravando = false;
+    bloquearTelaImportacao(false);
+    const erro = mensagemErroImportacao(err);
+    const item = /Item (\d+):/.exec(erro.texto);
+    if(item) state.erros[+item[1]-1] = erro.texto.replace(/^Item \d+:\s*/, '');
+    state.erroGravacao = erro.incerto
+      ? `Não foi possível confirmar se a nota foi gravada (falha de conexão: ${erro.texto}). Antes de tentar de novo, atualize a página e confira a Entrada da Central. Se a nota já estiver lá, não importe novamente.`
+      : `A nota NÃO foi gravada. Nenhum item foi lançado no estoque. Motivo: ${erro.texto}`;
+    render();
+    await esperarPinturaDaTela();
+    alert(state.erroGravacao);
+  }
 }
 
+// Mostra na tela se a soma dos itens lidos bate com o total da nota: é o sinal
+// mais direto de que o leitor deixou algum item (ou página) para trás.
+function htmlConferenciaTotalPDF(state){
+  const ref = totalReferenciaNotaPDF(state.header);
+  if(!ref) return '';
+  const soma = state.itens.reduce((acc,item)=>acc+Number(item.valorTotalNF||0),0);
+  const diferenca = somaItensNaoFecha(state);
+  return diferenca
+    ? `<div class="import-item__warn" style="margin-top:10px">Soma dos ${state.itens.length} itens lidos: <strong>${fmtMoney(soma)}</strong> — ${ref.rotulo}: <strong>${fmtMoney(ref.valor)}</strong>. Os valores não batem: confira se todos os itens da nota foram lidos antes de lançar.</div>`
+    : `<div class="hint" style="margin-top:6px">Conferência: soma dos ${state.itens.length} itens lidos (${fmtMoney(soma)}) confere com o ${ref.rotulo}.</div>`;
+}
 function renderImportarNF(container, embedded=false){
   const c = container || document.getElementById('content');
+  const notaDuplicada = nfImport ? findNotaJaLancada(nfImport.header) : null;
   let html = embedded ? `<h2 style="margin:0 0 8px">Importar Nota Fiscal (PDF)</h2><p class="pagesub" style="margin-bottom:16px">Envie o PDF da nota fiscal eletrônica (NF-e/DANFE) para ler os produtos automaticamente e lançar a entrada na Central.</p>` : `<h1 class="pagetitle">Importar Nota Fiscal (PDF)</h1><p class="pagesub">Envie o PDF da nota fiscal eletrônica (NF-e/DANFE) para ler os produtos automaticamente e lançar a entrada na Central.</p>`;
 
   html += `<div class="card"><h2>Selecione o PDF</h2>
     <div class="field" style="max-width:420px">
       <label>Arquivo da Nota Fiscal (.pdf)</label>
-      <input type="file" id="inputNF" accept="application/pdf,.pdf">
+      <input type="file" id="inputNF" accept="application/pdf,.pdf" ${importacaoGravando?'disabled':''}>
     </div>
-    <div id="nfStatus" class="hint">${nfImport ? `Nota lida: <strong>${escapeHtml(nfImport.fileName)}</strong> — ${nfImport.itens.length} item(ns) encontrado(s).` : ''}</div>
+    <div id="nfStatus" class="hint">${nfImport ? `Nota lida: <strong>${escapeHtml(nfImport.fileName)}</strong> — ${nfImport.itens.length} item(ns) encontrado(s). Prefira o XML quando tiver: a leitura do PDF pode falhar em alguns modelos de nota.` : ''}</div>
+    ${nfImport ? htmlConferenciaTotalPDF(nfImport) : ''}
   </div>`;
 
   if(nfImport){
@@ -2859,44 +3252,16 @@ function renderImportarNF(container, embedded=false){
         <div class="field"><label>Data de Emissão</label><input type="date" id="nfData" value="${nfImport.header.data||''}"></div>
       </div>
     </div>`;
+    html += avisoNotaDuplicadaHtml(notaDuplicada);
 
     html += `<div class="card import-items-card"><h2>3. Itens Encontrados (${nfImport.itens.length})</h2>`;
     if(nfImport.itens.length===0){
-      html += `<div class="empty">Não conseguimos identificar os itens automaticamente nesta nota. Veja o texto extraído abaixo e lance manualmente na aba Entrada na Central.</div>`;
+      html += `<div class="empty">Não conseguimos identificar os itens automaticamente nesta nota. Use o XML da nota, se tiver, ou lance manualmente na aba Entrada na Central.</div>`;
     } else {
-      html += `<div class="import-items-help"><strong>Confira cada item antes de lançar.</strong><span>Vincule a um produto existente ou complete o cadastro quando for um produto novo.</span></div><div class="import-items-list">`;
-      nfImport.itens.forEach((item, i)=>{
-        html += `<article class="import-item${item.incluir?'':' is-disabled'}">
-          <div class="import-item__topline">
-            <label class="import-check"><input type="checkbox" class="nfIncluir" data-i="${i}" ${item.incluir?'checked':''}><span>Incluir no estoque</span></label>
-            <span class="import-item__number">Item ${String(i+1).padStart(2,'0')}</span>
-            <span class="import-item__status ${item.novoProduto?'is-new':'is-linked'}">${item.novoProduto?'Novo cadastro':'Produto vinculado'}</span>
-          </div>
-          <div class="import-item__grid">
-            <label class="import-control import-control--description"><span>Descrição da nota</span><input type="text" class="nfDesc" data-i="${i}" value="${escapeHtml(item.descricao)}"></label>
-            <label class="import-control"><span>Quantidade</span><input type="number" step="0.01" class="nfQtd" data-i="${i}" value="${item.quantidade}"></label>
-            <label class="import-control"><span>Valor unitário</span><input type="number" step="0.01" class="nfPreco" data-i="${i}" value="${item.valorUnitario}"></label>
-            <div class="import-control import-control--total"><span>Valor total</span><strong class="nfTotalCell" data-i="${i}">${fmtMoney(item.quantidade*item.valorUnitario)}</strong></div>
-            <label class="import-control import-control--product"><span>Produto no cadastro</span><select class="nfProduto" data-i="${i}">
-              ${nomesOrdenados(db.brutos).map(nome=>`<option value="${escapeHtml(nome)}" ${item.matchProdutoNome===nome && !item.novoProduto?'selected':''}>${escapeHtml(nome)}</option>`).join('')}
-              <option value="__novo__" ${item.novoProduto?'selected':''}>+ Cadastrar como novo produto</option>
-            </select></label>
-          </div>`;
-        if(item.novoProduto){
-          html += `<details class="import-new-product">
-            <summary class="import-new-product__heading"><div><strong>Dados do novo produto</strong><span>Este cadastro será criado junto com a entrada.</span></div></summary>
-            <div class="import-new-product__grid">
-              <label class="import-control"><span>Categoria</span><select class="nfNovaCategoria" data-i="${i}">${categoriaOptions().map(cat=>`<option ${item.novaCategoria===cat?'selected':''}>${cat}</option>`).join('')}</select></label>
-              <label class="import-control"><span>Unidade</span><select class="nfNovaUnidade" data-i="${i}">${UNIDADES.map(u=>`<option ${item.novaUnidade===u?'selected':''}>${u}</option>`).join('')}</select></label>
-              <label class="import-control"><span>Estoque mínimo</span><input type="number" step="0.01" class="nfNovoMinimo" data-i="${i}" value="${item.novoMinimo}"></label>
-              <label class="import-control"><span>Validade padrão (dias)</span><input type="number" class="nfNovaValidade" data-i="${i}" value="${item.novaValidadeDias}"></label>
-            </div>
-          </details>`;
-        }
-        html += `</article>`;
-      });
+      html += `<div class="import-items-help"><strong>Confira cada item antes de lançar.</strong><span>Vincule a um produto existente ou complete o cadastro quando for um produto novo. Nada é lançado no estoque até o banco confirmar a nota inteira.</span></div><div class="import-items-list">`;
+      html += htmlItensImportacao('nf', nfImport);
       html += `</div>`;
-      html += `<div class="import-actions"><button class="btn" id="btnConfirmarNF">✓ Confirmar e Lançar no Estoque</button><button class="btn secondary" type="button" id="btnCancelarNF">Cancelar PDF</button></div>`;
+      html += htmlAcoesImportacao('nf', nfImport, !!notaDuplicada);
     }
     html += `</div>`;
 
@@ -2912,71 +3277,17 @@ function renderImportarNF(container, embedded=false){
   if(inputNF) inputNF.addEventListener('change', (e)=>{ const f=e.target.files[0]; if(f) handleNFFile(f); });
   if(!nfImport) return;
 
-  c.querySelector('#nfFornecedor')?.addEventListener('input', e=> nfImport.header.fornecedor = e.target.value);
-  c.querySelector('#nfNumero')?.addEventListener('input', e=> nfImport.header.nf = e.target.value);
+  c.querySelector('#nfFornecedor')?.addEventListener('change', e=>{ nfImport.header.fornecedor = e.target.value; render(); });
+  c.querySelector('#nfNumero')?.addEventListener('change', e=>{ nfImport.header.nf = e.target.value; render(); });
   c.querySelector('#nfData')?.addEventListener('input', e=> nfImport.header.data = e.target.value);
   c.querySelector('#btnToggleRaw')?.addEventListener('click', ()=>{
     const pre = c.querySelector('#nfRawText'); pre.style.display = pre.style.display==='none' ? 'block' : 'none';
   });
-
-  c.querySelectorAll('.nfIncluir').forEach(el=> el.addEventListener('change', e=>{
-    nfImport.itens[+e.target.dataset.i].incluir = e.target.checked;
-    e.target.closest('.import-item')?.classList.toggle('is-disabled',!e.target.checked);
-  }));
-  c.querySelectorAll('.nfDesc').forEach(el=> el.addEventListener('input', e=>{ nfImport.itens[+e.target.dataset.i].descricao = e.target.value; }));
-  c.querySelectorAll('.nfQtd').forEach(el=> el.addEventListener('input', e=>{
-    const i=+e.target.dataset.i; nfImport.itens[i].quantidade = parseFloat(e.target.value)||0; updateNFRowTotal(i);
-  }));
-  c.querySelectorAll('.nfPreco').forEach(el=> el.addEventListener('input', e=>{
-    const i=+e.target.dataset.i; nfImport.itens[i].valorUnitario = parseFloat(e.target.value)||0; updateNFRowTotal(i);
-  }));
-  c.querySelectorAll('.nfProduto').forEach(el=> el.addEventListener('change', e=>{
-    const i=+e.target.dataset.i; const v = e.target.value;
-    if(v==='__novo__'){ nfImport.itens[i].novoProduto = true; nfImport.itens[i].matchProdutoNome=''; }
-    else { nfImport.itens[i].novoProduto = false; nfImport.itens[i].matchProdutoNome = v; }
-    render();
-  }));
-  c.querySelectorAll('.nfNovaCategoria').forEach(el=> el.addEventListener('change', e=>{ nfImport.itens[+e.target.dataset.i].novaCategoria = e.target.value; }));
-  c.querySelectorAll('.nfNovaUnidade').forEach(el=> el.addEventListener('change', e=>{ nfImport.itens[+e.target.dataset.i].novaUnidade = e.target.value; }));
-  c.querySelectorAll('.nfNovoMinimo').forEach(el=> el.addEventListener('input', e=>{ nfImport.itens[+e.target.dataset.i].novoMinimo = parseFloat(e.target.value)||0; }));
-  c.querySelectorAll('.nfNovaValidade').forEach(el=> el.addEventListener('input', e=>{ nfImport.itens[+e.target.dataset.i].novaValidadeDias = parseFloat(e.target.value)||0; }));
-
+  bindItensImportacao(c, 'nf', nfImport, 'pdf');
   c.querySelector('#btnCancelarNF')?.addEventListener('click', ()=>{
+    if(importacaoGravando) return;
     if(!confirm('Cancelar a importação deste PDF? Nenhum item será lançado no estoque.')) return;
     nfImport = null;
-    render();
-  });
-
-  c.querySelector('#btnConfirmarNF')?.addEventListener('click', ()=>{
-    const header = nfImport.header;
-    if(!header.data){ alert('Informe a data de emissão da nota.'); return; }
-    let count = 0;
-    nfImport.itens.forEach(item=>{
-      if(!item.incluir) return;
-      let nomeProduto = item.novoProduto ? item.descricao.trim() : item.matchProdutoNome;
-      if(!nomeProduto) return;
-      if(item.novoProduto && !db.brutos.some(b=>b.nome.toLowerCase()===nomeProduto.toLowerCase())){
-        db.brutos.push({
-          nome: nomeProduto, categoria: item.novaCategoria||'Outros', unidade: item.novaUnidade||'UN',
-          estoqueMinimo: item.novoMinimo||0, fornecedor: header.fornecedor||'', precoMedio: item.valorUnitario||0,
-          validadeDias: item.novaValidadeDias||0,
-        });
-      }
-      const prodCad = db.brutos.find(b=>b.nome===nomeProduto);
-      let validade = '';
-      if(prodCad && header.data){
-        const d = new Date(header.data+'T00:00:00'); d.setDate(d.getDate()+Number(prodCad.validadeDias||0));
-        validade = d.toISOString().slice(0,10);
-      }
-      db.entradasCentral.push({
-        data: header.data, nf: header.nf||'', produto: nomeProduto, fornecedor: header.fornecedor||'',
-        quantidade: item.quantidade, precoUnitario: item.valorUnitario, validade,
-      });
-      count++;
-    });
-    saveDB();
-    alert(count>0 ? `${count} item(ns) lançado(s) na Entrada da Central com sucesso!` : 'Nenhum item marcado para lançamento.');
-    if(count>0){ nfImport = null; currentTab = 'entradasCentral'; }
     render();
   });
 }
@@ -3027,21 +3338,7 @@ function parseNFeXml(text){
   }).filter(item=>item.descricao && item.quantidade>0);
   return { header, itens };
 }
-function xmlImportItemFromRaw(it){
-  const match = findMatchingProduto(it.descricao);
-  return {
-    descricao: it.descricao,
-    quantidade: it.quantidade,
-    valorUnitario: it.valorUnitario,
-    incluir: true,
-    matchProdutoNome: match ? match.produto.nome : '',
-    novoProduto: !match,
-    novaCategoria: 'Outros',
-    novaUnidade: mapUnidadeNF(it.unidade),
-    novoMinimo: 0,
-    novaValidadeDias: 0,
-  };
-}
+function xmlImportItemFromRaw(it){ return importItemFromRaw(it); }
 async function handleXMLFile(file){
   const statusEl = document.getElementById('xmlStatus');
   try{
@@ -3058,16 +3355,6 @@ async function handleXMLFile(file){
   }catch(err){
     if(statusEl){ statusEl.textContent = 'Erro ao ler o XML: ' + err.message; statusEl.className='hint warn'; }
     else alert('Erro ao ler o XML: ' + err.message);
-  }
-}
-function updateXMLRowTotal(i){
-  const cell = document.querySelector(`.xmlTotalCell[data-i="${i}"]`);
-  if(cell) cell.textContent = fmtMoney(xmlImport.itens[i].quantidade * xmlImport.itens[i].valorUnitario);
-  const projectedStock = document.querySelector(`.xmlProjectedStock[data-i="${i}"]`);
-  if(projectedStock){
-    const item = xmlImport.itens[i];
-    const atual = !item.novoProduto && item.matchProdutoNome ? saldoCentral(item.matchProdutoNome) : 0;
-    projectedStock.value = fmtNum(atual + Number(item.quantidade||0));
   }
 }
 function notaFiscalKey(nf){
@@ -3111,7 +3398,7 @@ function renderImportarXML(container, embedded=false){
   html += `<div class="card"><h2>Selecione o XML</h2>
     <div class="field" style="max-width:420px">
       <label>Arquivo da Nota Fiscal (.xml)</label>
-      <input type="file" id="inputXML" accept="text/xml,application/xml,.xml">
+      <input type="file" id="inputXML" accept="text/xml,application/xml,.xml" ${importacaoGravando?'disabled':''}>
     </div>
     <div id="xmlStatus" class="hint">${xmlImport ? `XML lido: <strong>${escapeHtml(xmlImport.fileName)}</strong> — ${xmlImport.itens.length} item(ns) encontrado(s).` : 'Campo em beta: confira os itens antes de lançar.'}</div>
   </div>`;
@@ -3130,42 +3417,10 @@ function renderImportarXML(container, embedded=false){
     if(xmlImport.itens.length===0){
       html += `<div class="empty">Não encontramos itens compatíveis com NF-e neste XML. Confira o arquivo e tente novamente.</div>`;
     } else {
-      html += `<div class="import-items-help"><strong>Confira cada item antes de lançar.</strong><span>Vincule a um produto existente ou complete o cadastro quando for um produto novo.</span></div><div class="import-items-list">`;
-      xmlImport.itens.forEach((item, i)=>{
-        html += `<article class="import-item${item.incluir?'':' is-disabled'}">
-          <div class="import-item__topline">
-            <label class="import-check"><input type="checkbox" class="xmlIncluir" data-i="${i}" ${item.incluir?'checked':''}><span>Incluir no estoque</span></label>
-            <span class="import-item__number">Item ${String(i+1).padStart(2,'0')}</span>
-            <span class="import-item__status ${item.novoProduto?'is-new':'is-linked'}">${item.novoProduto?'Novo cadastro':'Produto vinculado'}</span>
-          </div>
-          <div class="import-item__grid">
-            <label class="import-control import-control--description"><span>Item no XML</span><input type="text" class="xmlDesc" data-i="${i}" value="${escapeHtml(item.descricao)}"></label>
-            <label class="import-control import-control--stock"><span>Estoque atual</span><input type="text" value="${fmtNum(!item.novoProduto && item.matchProdutoNome ? saldoCentral(item.matchProdutoNome) : 0)}" readonly aria-label="Estoque atual do produto"></label>
-            <label class="import-control"><span>Quantidade</span><input type="number" step="0.01" class="xmlQtd" data-i="${i}" value="${item.quantidade}"></label>
-            <label class="import-control import-control--stock"><span>Estoque após entrada</span><input type="text" class="xmlProjectedStock" data-i="${i}" value="${fmtNum((!item.novoProduto && item.matchProdutoNome ? saldoCentral(item.matchProdutoNome) : 0) + Number(item.quantidade||0))}" readonly aria-label="Estoque após a entrada"></label>
-            <label class="import-control"><span>Preço de custo</span><input type="number" step="0.01" class="xmlPreco" data-i="${i}" value="${item.valorUnitario}"></label>
-            <div class="import-control import-control--total"><span>Valor total</span><strong class="xmlTotalCell" data-i="${i}">${fmtMoney(item.quantidade*item.valorUnitario)}</strong></div>
-            <label class="import-control import-control--product"><span>Produto no cadastro</span><select class="xmlProduto" data-i="${i}">
-              <option value="" ${!item.novoProduto && !item.matchProdutoNome?'selected':''}>Selecione um produto...</option>
-              ${nomesOrdenados(db.brutos).map(nome=>`<option value="${escapeHtml(nome)}" ${item.matchProdutoNome===nome && !item.novoProduto?'selected':''}>${escapeHtml(nome)}</option>`).join('')}
-              <option value="__novo__" ${item.novoProduto?'selected':''}>+ Cadastrar como novo produto</option>
-            </select></label>
-          </div>`;
-        if(item.novoProduto){
-          html += `<details class="import-new-product">
-            <summary class="import-new-product__heading"><div><strong>Dados do novo produto</strong><span>Este cadastro será criado junto com a entrada.</span></div></summary>
-            <div class="import-new-product__grid">
-              <label class="import-control"><span>Categoria</span><select class="xmlNovaCategoria" data-i="${i}">${categoriaOptions().map(cat=>`<option ${item.novaCategoria===cat?'selected':''}>${cat}</option>`).join('')}</select></label>
-              <label class="import-control"><span>Unidade</span><select class="xmlNovaUnidade" data-i="${i}">${UNIDADES.map(u=>`<option ${item.novaUnidade===u?'selected':''}>${u}</option>`).join('')}</select></label>
-              <label class="import-control"><span>Estoque mínimo</span><input type="number" step="0.01" class="xmlNovoMinimo" data-i="${i}" value="${item.novoMinimo}"></label>
-              <label class="import-control"><span>Validade padrão (dias)</span><input type="number" class="xmlNovaValidade" data-i="${i}" value="${item.novaValidadeDias}"></label>
-            </div>
-          </details>`;
-        }
-        html += `</article>`;
-      });
+      html += `<div class="import-items-help"><strong>Confira cada item antes de lançar.</strong><span>Vincule a um produto existente ou complete o cadastro quando for um produto novo. Nada é lançado no estoque até o banco confirmar a nota inteira.</span></div><div class="import-items-list">`;
+      html += htmlItensImportacao('xml', xmlImport);
       html += `</div>`;
-      html += `<div class="import-actions"><button class="btn" id="btnConfirmarXML" ${notaDuplicada?'disabled title="Nota já importada"':''}>Confirmar e Lançar no Estoque</button><button class="btn secondary" type="button" id="btnCancelarXML">Cancelar XML</button></div>`;
+      html += htmlAcoesImportacao('xml', xmlImport, !!notaDuplicada);
     }
     html += `</div>`;
 
@@ -3186,67 +3441,11 @@ function renderImportarXML(container, embedded=false){
   c.querySelector('#btnToggleXMLRaw')?.addEventListener('click', ()=>{
     const pre = c.querySelector('#xmlRawText'); pre.style.display = pre.style.display==='none' ? 'block' : 'none';
   });
-  c.querySelectorAll('.xmlIncluir').forEach(el=> el.addEventListener('change', e=>{
-    xmlImport.itens[+e.target.dataset.i].incluir = e.target.checked;
-    e.target.closest('.import-item')?.classList.toggle('is-disabled',!e.target.checked);
-  }));
-  c.querySelectorAll('.xmlDesc').forEach(el=> el.addEventListener('input', e=>{ xmlImport.itens[+e.target.dataset.i].descricao = e.target.value; }));
-  c.querySelectorAll('.xmlQtd').forEach(el=> el.addEventListener('input', e=>{ const i=+e.target.dataset.i; xmlImport.itens[i].quantidade = parseFloat(e.target.value)||0; updateXMLRowTotal(i); }));
-  c.querySelectorAll('.xmlPreco').forEach(el=> el.addEventListener('input', e=>{ const i=+e.target.dataset.i; xmlImport.itens[i].valorUnitario = parseFloat(e.target.value)||0; updateXMLRowTotal(i); }));
-  c.querySelectorAll('.xmlProduto').forEach(el=> el.addEventListener('change', e=>{
-    const i=+e.target.dataset.i; const v = e.target.value;
-    if(v==='__novo__'){ xmlImport.itens[i].novoProduto = true; xmlImport.itens[i].matchProdutoNome=''; }
-    else { xmlImport.itens[i].novoProduto = false; xmlImport.itens[i].matchProdutoNome = v; }
-    render();
-  }));
-  c.querySelectorAll('.xmlNovaCategoria').forEach(el=> el.addEventListener('change', e=>{ xmlImport.itens[+e.target.dataset.i].novaCategoria = e.target.value; }));
-  c.querySelectorAll('.xmlNovaUnidade').forEach(el=> el.addEventListener('change', e=>{ xmlImport.itens[+e.target.dataset.i].novaUnidade = e.target.value; }));
-  c.querySelectorAll('.xmlNovoMinimo').forEach(el=> el.addEventListener('input', e=>{ xmlImport.itens[+e.target.dataset.i].novoMinimo = parseFloat(e.target.value)||0; }));
-  c.querySelectorAll('.xmlNovaValidade').forEach(el=> el.addEventListener('input', e=>{ xmlImport.itens[+e.target.dataset.i].novaValidadeDias = parseFloat(e.target.value)||0; }));
-
+  bindItensImportacao(c, 'xml', xmlImport, 'xml');
   c.querySelector('#btnCancelarXML')?.addEventListener('click', ()=>{
+    if(importacaoGravando) return;
     if(!confirm('Cancelar a importação deste XML? Nenhum item será lançado no estoque.')) return;
     xmlImport = null;
-    render();
-  });
-
-  c.querySelector('#btnConfirmarXML')?.addEventListener('click', ()=>{
-    if(!ensureCanEdit()) return;
-    const header = xmlImport.header;
-    if(!header.data){ alert('Informe a data de emissão da nota.'); return; }
-    const duplicada = findNotaJaLancada(header);
-    if(duplicada){
-      alert(`Importação bloqueada: a NF ${duplicada.nf || header.nf} já foi importada e concluída no sistema${duplicada.data ? ` em ${fmtDate(duplicada.data)}` : ''}.`);
-      render();
-      return;
-    }
-    let count = 0;
-    xmlImport.itens.forEach(item=>{
-      if(!item.incluir) return;
-      let nomeProduto = item.novoProduto ? item.descricao.trim() : item.matchProdutoNome;
-      if(!nomeProduto) return;
-      if(item.novoProduto && !db.brutos.some(b=>b.nome.toLowerCase()===nomeProduto.toLowerCase())){
-        db.brutos.push({
-          nome: nomeProduto, categoria: item.novaCategoria||'Outros', unidade: item.novaUnidade||'UN',
-          estoqueMinimo: item.novoMinimo||0, fornecedor: header.fornecedor||'', precoMedio: item.valorUnitario||0,
-          validadeDias: item.novaValidadeDias||0,
-        });
-      }
-      const prodCad = db.brutos.find(b=>b.nome===nomeProduto);
-      let validade = '';
-      if(prodCad && header.data){
-        const d = new Date(header.data+'T00:00:00'); d.setDate(d.getDate()+Number(prodCad.validadeDias||0));
-        validade = d.toISOString().slice(0,10);
-      }
-      db.entradasCentral.push({
-        data: header.data, nf: header.nf||'', produto: nomeProduto, fornecedor: header.fornecedor||'',
-        quantidade: item.quantidade, precoUnitario: item.valorUnitario, validade,
-      });
-      count++;
-    });
-    saveDB();
-    alert(count>0 ? `${count} item(ns) lançado(s) na Entrada da Central com sucesso!` : 'Nenhum item marcado para lançamento.');
-    if(count>0){ xmlImport = null; currentTab = 'entradasCentral'; }
     render();
   });
 }

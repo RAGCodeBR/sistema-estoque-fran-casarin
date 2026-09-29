@@ -34,6 +34,7 @@ declare global {
       updateProduct: (tipo: "bruto" | "fracionado", nomeAtual: string, produto: Record<string, unknown>) => Promise<void>;
       updateCatalog: (section: "categorias" | "locais", current: Record<string, unknown>, next: Record<string, unknown>) => Promise<void>;
       restoreBackup: (db: unknown) => Promise<void>;
+      importInvoice: (nota: Record<string, unknown>) => Promise<{ entradas: number; produtosCriados: number; atualizacaoPendente: boolean }>;
     };
     __estoqueLegacy?: {
       getDB: () => unknown;
@@ -58,7 +59,7 @@ declare global {
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 // Alterar este sufixo quando uma correção crítica for feita no script legado.
 // Assim navegadores que ainda tinham o JavaScript antigo carregam a versão nova.
-const assetVersion = `${process.env.NEXT_PUBLIC_APP_VERSION ?? "local"}-saldo-projetado-importacao-1`;
+const assetVersion = `${process.env.NEXT_PUBLIC_APP_VERSION ?? "local"}-importacao-nf-segura-1`;
 const defaultEmail = "";
 
 function authErrorMessage(error: unknown) {
@@ -165,7 +166,7 @@ export default function LegacyStockSystem() {
         window.__estoqueAccess = {
           profile: perfil,
           canEdit: perfil.ativo && (perfil.papel === "master" || perfil.papel === "administrador"),
-          canManageUsers: perfil.ativo && perfil.papel === "master",
+          canManageUsers: perfil.ativo && (perfil.papel === "master" || perfil.papel === "administrador"),
           listUsers: () => listPerfis(supabase),
           createUser: (input) => createPerfilUser(supabase, input),
           updateUser: (input) => updatePerfilUser(supabase, input),

@@ -536,7 +536,7 @@ export async function updatePerfilUser(
 export async function deletePerfilUser(supabase: SupabaseClient, input: { user_id: string; motivo?: string }) {
   const { data, error } = await supabase.rpc("excluir_acesso_sistema", {
     p_user_id: input.user_id,
-    p_motivo: input.motivo || "Exclusao pelo Master",
+    p_motivo: input.motivo || "Exclusao pela gestao de acessos",
   });
   if (error) throw error;
   return data;
@@ -1067,6 +1067,12 @@ export function installCloudSync(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let remoteTimer: ReturnType<typeof setTimeout> | undefined;
   let saveChain: Promise<void> = Promise.resolve();
+  // Cada substituição da cópia local pelo banco avança a versão. Registros
+  // gravados pela importação de NF ficam protegidos contra gravações cuja
+  // fotografia foi tirada antes de eles chegarem à tela: essa fotografia não
+  // os contém, e o diff os trataria como excluídos.
+  let baseVersion = 0;
+  const importedRows = new Map<string, number>();
   let lastSavedDB: LegacyDB = (() => {
     try {
       return cloneDB(JSON.parse(window.localStorage?.getItem(STORAGE_KEY) || "null") || emptyDB());
@@ -1080,8 +1086,19 @@ export function installCloudSync(
     window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(freshDB));
     lastSavedDB = cloneDB(freshDB);
     stockRevision = revision;
+    baseVersion += 1;
     window.__estoqueLegacy?.replaceDB(freshDB);
     return freshDB;
+  }
+
+  function withoutImportedRows(db: LegacyDB, snapshotVersion: number): LegacyDB {
+    if (importedRows.size === 0) return db;
+    const isProtected = (row: Record<string, any>) => row._id != null && (importedRows.get(String(row._id)) ?? -1) >= snapshotVersion;
+    const filtered = { ...db };
+    incrementalSections.forEach((section) => {
+      (filtered as any)[section] = ((db[section] as Array<Record<string, any>>) ?? []).filter((row) => !isProtected(row));
+    });
+    return filtered;
   }
 
   (window as any).__estoqueCloudSync = {
@@ -1235,13 +1252,14 @@ export function installCloudSync(
       clearTimeout(timer);
       window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvando" } }));
       const queuedDB = cloneDB(db);
+      const snapshotVersion = baseVersion;
       timer = setTimeout(() => {
         timer = undefined;
         saveChain = saveChain.then(async () => {
           saving = true;
           try {
             const nextDB = queuedDB;
-            const beforeDB = cloneDB(lastSavedDB);
+            const beforeDB = withoutImportedRows(cloneDB(lastSavedDB), snapshotVersion);
             assertValidMovements(nextDB);
             const operations = buildIncrementalOperations(beforeDB, nextDB, scope);
             await applyIncrementalOperations(supabase, operations);
@@ -1278,6 +1296,40 @@ export function installCloudSync(
     setRemoteState(db: LegacyDB, revision: number) {
       lastSavedDB = cloneDB(db);
       stockRevision = revision;
+      baseVersion += 1;
+    },
+    async importInvoice(nota: Record<string, any>) {
+      if (scope !== "full") throw new Error("Somente Master ou Administrador pode importar notas fiscais.");
+      // A nota nunca é gravada junto com outro lançamento: espera o envio
+      // pendente sair e entra na mesma fila das demais gravações.
+      while (timer !== undefined) await wait(100);
+      const run = saveChain.then(async () => {
+        saving = true;
+        window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvando" } }));
+        try {
+          // Caminho exclusivo de inserção: a RPC só cria produtos novos e as
+          // entradas desta nota, tudo ou nada, sem alterar nem excluir registros.
+          const { data, error } = await supabase.rpc("importar_nota_fiscal", { p_nota: nota });
+          if (error) throw error;
+          const result: Record<string, any> = { ...(data as Record<string, any>), atualizacaoPendente: false };
+          baseVersion += 1;
+          [...(result.entradaIds ?? []), ...(result.produtoIds ?? [])].forEach((id: unknown) => importedRows.set(String(id), baseVersion));
+          try {
+            await refreshLocalState();
+          } catch (refreshError) {
+            // A nota já está gravada. A tela será atualizada na próxima
+            // verificação, e os registros novos seguem protegidos até lá.
+            console.warn("Nota gravada, mas não foi possível atualizar a tela agora.", refreshError);
+            result.atualizacaoPendente = true;
+          }
+          window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
+          return result;
+        } finally {
+          saving = false;
+        }
+      });
+      saveChain = run.then(() => undefined, () => undefined);
+      return run;
     },
   };
 
