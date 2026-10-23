@@ -238,12 +238,34 @@ async function createCheckpoint(supabase: SupabaseClient, user: User, db: Legacy
   if (error) throw new Error(`Não foi possível criar o ponto de recuperação: ${error.message}`);
 }
 
+const STOCK_READ_PAGE_SIZE = 500;
+
+class StockChangedDuringReadError extends Error {}
+
 async function selectAll<T>(supabase: SupabaseClient, table: string, columns = "*", somenteAtivos = false) {
-  let query = supabase.from(table).select(columns).order("criado_em", { ascending: true });
-  if (somenteAtivos) query = query.eq("ativo", true);
-  const { data, error } = await query;
-  if (error) throw error;
-  return (data ?? []) as T[];
+  const rows: T[] = [];
+  let expectedTotal: number | null = null;
+
+  // PostgREST limita o número de linhas de cada resposta. Consultar uma vez
+  // só deixava os movimentos mais recentes fora do saldo e dos relatórios.
+  while (expectedTotal === null || rows.length < expectedTotal) {
+    let query = supabase.from(table)
+      .select(columns, { count: "exact" })
+      .order("criado_em", { ascending: true })
+      .order("id", { ascending: true })
+      .range(rows.length, rows.length + STOCK_READ_PAGE_SIZE - 1);
+    if (somenteAtivos) query = query.eq("ativo", true);
+    const { data, error, count } = await query;
+    if (error) throw error;
+    if (typeof count !== "number") throw new Error(`Não foi possível conferir a quantidade de registros em ${table}.`);
+    if (expectedTotal !== null && count !== expectedTotal) throw new StockChangedDuringReadError();
+    expectedTotal = count;
+    const page = (data ?? []) as T[];
+    if (page.length === 0 && rows.length < expectedTotal) throw new StockChangedDuringReadError();
+    rows.push(...page);
+    if (rows.length > expectedTotal) throw new StockChangedDuringReadError();
+  }
+  return rows;
 }
 
 export async function loadLegacyDB(supabase: SupabaseClient): Promise<LegacyDB> {
@@ -403,12 +425,23 @@ export async function loadStockRevision(supabase: SupabaseClient): Promise<numbe
 // garante que não montaremos uma cópia com parte do banco antes e parte depois
 // da gravação de outro usuário.
 export async function loadConsistentLegacyState(supabase: SupabaseClient): Promise<{ db: LegacyDB; revision: number }> {
+  let incompleteRead = false;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const revisionBefore = await loadStockRevision(supabase);
-    const db = await loadLegacyDB(supabase);
+    let db: LegacyDB;
+    try {
+      db = await loadLegacyDB(supabase);
+    } catch (error) {
+      if (error instanceof StockChangedDuringReadError) {
+        incompleteRead = true;
+        continue;
+      }
+      throw error;
+    }
     const revisionAfter = await loadStockRevision(supabase);
     if (revisionBefore === revisionAfter) return { db, revision: revisionAfter };
   }
+  if (incompleteRead) throw new Error("Não foi possível carregar todos os registros do estoque. Atualize a página e tente novamente.");
   throw new Error("O estoque está sendo atualizado por outro usuário. Tente novamente em alguns segundos.");
 }
 
