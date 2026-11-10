@@ -1079,11 +1079,12 @@ function buildIncrementalOperations(before: LegacyDB, after: LegacyDB, scope: Sy
   return operations;
 }
 
-async function applyIncrementalOperations(supabase: SupabaseClient, operations: IncrementalOperation[]) {
+async function applyIncrementalOperations(supabase: SupabaseClient, operations: IncrementalOperation[], beforeSend: () => void) {
   if (operations.length === 0) return;
   if (operations.length > 50) {
     throw new Error("Proteção ativada: esta ação tentou alterar mais de 50 registros. Nenhuma alteração foi enviada.");
   }
+  beforeSend();
   const { error } = await supabase.rpc("aplicar_operacoes_estoque", { p_operacoes: operations });
   if (error) throw error;
 }
@@ -1100,6 +1101,30 @@ export function installCloudSync(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let remoteTimer: ReturnType<typeof setTimeout> | undefined;
   let saveChain: Promise<void> = Promise.resolve();
+  // Um navegador com um fluxo defeituoso não deve saturar o banco com RPCs.
+  // O contador é compartilhado entre abas do mesmo perfil e só vale para
+  // gravações incrementais; consultas e autenticação continuam disponíveis.
+  const writeGuardKey = `estoqueFranCasarinWriteGuard:${user.id}`;
+  let writePauseUntil = 0;
+  let conflictEpoch = 0;
+  let localWriteTimes: number[] = [];
+  function reserveIncrementalWrite() {
+    const now = Date.now();
+    if (now < writePauseUntil) throw new Error("Gravações pausadas por segurança. Aguarde alguns segundos e tente novamente.");
+    let times = localWriteTimes;
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(writeGuardKey) || "[]");
+      if (Array.isArray(stored)) times = stored.filter((value): value is number => typeof value === "number");
+    } catch { /* O limite da aba ainda funciona sem localStorage. */ }
+    times = times.filter((value) => value > now - 60_000 && value <= now);
+    if (times.length >= 60) {
+      writePauseUntil = times[0] + 60_000;
+      throw new Error("Muitas gravações em um minuto. Aguarde a sincronização antes de tentar novamente.");
+    }
+    times.push(now);
+    localWriteTimes = times;
+    try { window.localStorage.setItem(writeGuardKey, JSON.stringify(times)); } catch { /* Limite local preservado. */ }
+  }
   // Cada substituição da cópia local pelo banco avança a versão. Registros
   // gravados pela importação de NF ficam protegidos contra gravações cuja
   // fotografia foi tirada antes de eles chegarem à tela: essa fotografia não
@@ -1201,7 +1226,7 @@ export function installCloudSync(
         id: String(current._id),
         atualizadoEm: current._updatedAt,
         dados: rowData(next),
-      }]);
+      }], reserveIncrementalWrite);
       await refreshLocalState();
       window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvo" } }));
     },
@@ -1281,21 +1306,30 @@ export function installCloudSync(
       }
     },
     save(db: LegacyDB, options?: { immediate?: boolean }) {
+      if (Date.now() < writePauseUntil) {
+        window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(lastSavedDB));
+        window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: {
+          status: "erro", message: "Gravações pausadas por segurança. Aguarde alguns segundos e tente novamente.",
+        } }));
+        return false;
+      }
       window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(db));
       clearTimeout(timer);
       window.dispatchEvent(new CustomEvent("estoque-cloud-status", { detail: { status: "salvando" } }));
       const queuedDB = cloneDB(db);
       const snapshotVersion = baseVersion;
+      const queuedConflictEpoch = conflictEpoch;
       timer = setTimeout(() => {
         timer = undefined;
         saveChain = saveChain.then(async () => {
+          if (Date.now() < writePauseUntil || queuedConflictEpoch !== conflictEpoch) return;
           saving = true;
           try {
             const nextDB = queuedDB;
             const beforeDB = withoutImportedRows(cloneDB(lastSavedDB), snapshotVersion);
             assertValidMovements(nextDB);
             const operations = buildIncrementalOperations(beforeDB, nextDB, scope);
-            await applyIncrementalOperations(supabase, operations);
+            await applyIncrementalOperations(supabase, operations, reserveIncrementalWrite);
             try {
               await insertSystemLog(supabase, user, beforeDB, nextDB);
             } catch (logError) {
@@ -1307,6 +1341,12 @@ export function installCloudSync(
           } catch (error) {
             console.error("Erro ao salvar estoque no Supabase", error);
             const errorInfo = syncErrorInfo(error);
+            if (errorInfo.code === "40001") {
+              // O estado local era antigo. Não reenviar a mesma exclusão em
+              // sequência; a recarga abaixo restaura a versão válida do banco.
+              writePauseUntil = Date.now() + 15_000;
+              conflictEpoch += 1;
+            }
             let message = errorInfo.message || (error instanceof Error ? error.message : "Verifique permissao do usuario ou dados obrigatorios.");
             if (errorInfo.code && errorInfo.code !== "40001") message = `${message} (código ${errorInfo.code})`;
             try {
@@ -1322,6 +1362,7 @@ export function installCloudSync(
           }
         });
       }, options?.immediate ? 0 : 900);
+      return true;
     },
     isSaving() {
       return saving || timer !== undefined;

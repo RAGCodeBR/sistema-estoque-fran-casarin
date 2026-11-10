@@ -273,7 +273,11 @@ function saveDB(){
     // criada no momento em que o usuário confirmou o formulário.
     const snapshot = JSON.parse(JSON.stringify(db));
     const movimentoEstoque=['entradasCentral','saidasCentral','producoes','saidasFracionado','ajustesEstoque'].includes(currentTab);
-    window.__estoqueCloudSync.save(snapshot, { immediate: movimentoEstoque });
+    if(window.__estoqueCloudSync.save(snapshot, { immediate: movimentoEstoque })===false){
+      db=loadDB();
+      render();
+      return false;
+    }
   }
   return true;
 }
