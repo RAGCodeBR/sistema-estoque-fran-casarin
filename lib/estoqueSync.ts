@@ -1114,7 +1114,10 @@ export function installCloudSync(
     let times = localWriteTimes;
     try {
       const stored = JSON.parse(window.localStorage.getItem(writeGuardKey) || "[]");
-      if (Array.isArray(stored)) times = stored.filter((value): value is number => typeof value === "number");
+      if (Array.isArray(stored)) {
+        const sharedTimes = stored.filter((value): value is number => typeof value === "number");
+        if (sharedTimes.length >= times.length) times = sharedTimes;
+      }
     } catch { /* O limite da aba ainda funciona sem localStorage. */ }
     times = times.filter((value) => value > now - 60_000 && value <= now);
     if (times.length >= 60) {
